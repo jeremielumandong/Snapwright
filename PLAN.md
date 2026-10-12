@@ -45,8 +45,13 @@ Gate: hotkey to overlay under 50 ms (p95) on macOS, Windows and X11.
 
 Gate: the team uses it daily with no capture lost in two weeks.
 
-- [ ] Window capture with snapping; capture delay timer; repeat last region.
-- [ ] Quick-access thumbnail after capture.
+- [x] Window capture with snapping; capture delay timer; repeat last region.
+      Note: snapping landed in P0-11. Tray "Capture in 3 seconds" (or `--capture-in=N`)
+      shows a countdown that closes before the grab. Ctrl/Cmd+Alt+Shift+2 repeats the last
+      region with no overlay: 5 ms from hotkey to clipboard under Xvfb.
+- [x] Quick-access thumbnail after capture.
+      Note: bottom-right preview for 6 s (longer while hovered); a click opens the capture in
+      the library; a new capture closes it first so it never shows up in a grab.
 - [ ] Editor on Emulsion's engine: arrow, rectangle, ellipse, line, text, highlight, blur and
       pixelate, step counter, crop; undo and redo; non-destructive scene saved beside the image.
 - [x] `snapwright-library`: SQLite + FTS5, content-addressed store, metadata (app, window
@@ -86,4 +91,4 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Library: fill `url` from browsers (macOS Accessibility / AppleScript, Windows UI Automation).
 - Library: drag a thumbnail out to other apps; multi-select; import existing images.
 - Captures folder: make the extra copy in `Pictures/Snapwright` a setting once settings exist.
-- gpui-fast: upstream a fix for the 2 px X11 window shift, then drop `X11_SHIFT`.
+- gpui-fast: upstream a fix for the 2 px X11 window shift, then drop `session::popup_bounds`.

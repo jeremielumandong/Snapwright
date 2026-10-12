@@ -4,12 +4,14 @@
 // Release builds on Windows are GUI-subsystem binaries: no console window behind the app.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod countdown;
 mod hotkey;
 mod library_view;
 mod output;
 mod overlay;
 mod selection;
 mod session;
+mod toast;
 mod tray;
 
 use std::time::Instant;
@@ -22,6 +24,10 @@ use tracing_subscriber::EnvFilter;
 const CAPTURE_NOW_ARG: &str = "--capture-now";
 /// `--library` opens the library window at launch.
 const LIBRARY_ARG: &str = "--library";
+/// `--capture-in=N` starts a capture after an N-second countdown.
+const CAPTURE_IN_ARG: &str = "--capture-in=";
+/// Delay for the tray's "Capture in 3 seconds".
+const TRAY_DELAY_SECS: u32 = 3;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -31,6 +37,10 @@ fn main() -> Result<()> {
         .init();
     let capture_now = std::env::args().any(|a| a == CAPTURE_NOW_ARG);
     let show_library = std::env::args().any(|a| a == LIBRARY_ARG);
+    let capture_in = std::env::args().find_map(|a| {
+        a.strip_prefix(CAPTURE_IN_ARG)
+            .and_then(|n| n.parse::<u32>().ok())
+    });
 
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
@@ -39,25 +49,33 @@ fn main() -> Result<()> {
             cx.quit();
             return;
         }
-        let hotkey_label = match hotkey::register() {
-            Ok((hotkey, mut presses)) => {
-                tracing::info!(hotkey = %hotkey.label, "press the hotkey to capture");
-                let label = hotkey.label.clone();
-                cx.set_global(hotkey);
+        let labels = match hotkey::register() {
+            Ok((hotkeys, mut presses)) => {
+                for (action, label) in &hotkeys.labels {
+                    tracing::info!(hotkey = %label, ?action, "hotkey registered");
+                }
+                let labels = tray::Labels {
+                    capture: hotkeys.label(hotkey::Action::Capture).map(str::to_owned),
+                    repeat: hotkeys.label(hotkey::Action::RepeatLast).map(str::to_owned),
+                };
+                cx.set_global(hotkeys);
                 cx.spawn(async move |cx| {
-                    while let Some(pressed_at) = presses.next().await {
-                        cx.update(|cx| session::start(pressed_at, cx));
+                    while let Some((action, pressed_at)) = presses.next().await {
+                        cx.update(|cx| match action {
+                            hotkey::Action::Capture => session::start(pressed_at, cx),
+                            hotkey::Action::RepeatLast => session::repeat_last(pressed_at, cx),
+                        });
                     }
                 })
                 .detach();
-                Some(label)
+                labels
             }
             Err(e) => {
-                tracing::warn!(error = %e, "global hotkey unavailable");
-                None
+                tracing::warn!(error = %e, "global hotkeys unavailable");
+                tray::Labels::default()
             }
         };
-        match tray::create(hotkey_label.as_deref()) {
+        match tray::create(&labels) {
             Ok((tray, mut actions)) => {
                 cx.set_global(tray);
                 cx.spawn(async move |cx| {
@@ -75,6 +93,9 @@ fn main() -> Result<()> {
         if show_library {
             library_view::open(cx);
         }
+        if let Some(seconds) = capture_in {
+            countdown::start(seconds, cx);
+        }
     });
     Ok(())
 }
@@ -82,6 +103,8 @@ fn main() -> Result<()> {
 fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
     match action {
         tray::Action::Capture => session::start(Instant::now(), cx),
+        tray::Action::CaptureDelayed => countdown::start(TRAY_DELAY_SECS, cx),
+        tray::Action::RepeatLast => session::repeat_last(Instant::now(), cx),
         tray::Action::OpenLibrary => library_view::open(cx),
         tray::Action::OpenFolder => match output::captures_dir() {
             Ok(dir) => {

@@ -40,6 +40,14 @@ struct Clipboard(Arc<output::LinuxClipboard>);
 #[cfg(target_os = "linux")]
 impl Global for Clipboard {}
 
+/// The last region delivered, for "repeat last region".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LastRegion {
+    display_id: u64,
+    rect: Rect,
+}
+impl Global for LastRegion {}
+
 /// Overlay windows of the session in progress, if any.
 #[derive(Default)]
 struct Active {
@@ -48,9 +56,21 @@ struct Active {
 }
 impl Global for Active {}
 
-/// See `open_overlays`.
+/// GPUI's X11 backend creates every window 2 px right of where it was asked (a Zed
+/// workaround for GNOME). Override-redirect pop-ups keep that shift, which would offset the
+/// frozen frame from the real screen.
 #[cfg(target_os = "linux")]
 const X11_SHIFT: f32 = 2.0;
+
+/// Bounds to request for a pop-up window so it lands exactly at `bounds`.
+pub fn popup_bounds(bounds: Bounds<gpui_kit::Pixels>) -> Bounds<gpui_kit::Pixels> {
+    #[cfg(target_os = "linux")]
+    let bounds = Bounds::new(
+        point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
+        bounds.size,
+    );
+    bounds
+}
 
 /// Connects to the platform capture API once, at startup.
 pub fn init(cx: &mut App) -> snapwright_capture::Result<()> {
@@ -102,8 +122,14 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
         return;
     }
     active.capturing = true;
+    // A quick-access preview still on screen would end up in the capture.
+    let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
     let capturer = cx.global::<CaptureService>().0.clone();
+    let timer = settle.map(|d| cx.background_executor().timer(d));
     let grab = cx.background_executor().spawn(async move {
+        if let Some(timer) = timer {
+            timer.await;
+        }
         let mut capturer = capturer
             .lock()
             .map_err(|_| anyhow::anyhow!("capture backend poisoned by an earlier panic"))?;
@@ -216,14 +242,7 @@ fn open_overlays(
             (o.x - wanted.origin.x).abs() < px(2.) && (o.y - wanted.origin.y).abs() < px(2.)
         });
         let bounds = screen.map(|d| d.bounds()).unwrap_or(wanted);
-        // GPUI's X11 backend creates every window 2 px right of where it was asked (a Zed
-        // workaround for GNOME). Override-redirect pop-ups keep that shift, which would offset
-        // the frozen frame from the real screen, so ask for 2 px less.
-        #[cfg(target_os = "linux")]
-        let bounds = Bounds::new(
-            point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
-            bounds.size,
-        );
+        let bounds = popup_bounds(bounds);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             display_id: screen.map(|d| d.id()),
@@ -252,6 +271,68 @@ fn open_overlays(
     cx.global_mut::<Active>().windows = windows;
 }
 
+/// Captures the last delivered region again, without the overlay: same display, same
+/// pixels. Falls back to a normal session when nothing was captured yet or that display is
+/// gone.
+pub fn repeat_last(pressed_at: Instant, cx: &mut App) {
+    let Some(last) = cx.try_global::<LastRegion>().copied() else {
+        start(pressed_at, cx);
+        return;
+    };
+    let active = cx.global_mut::<Active>();
+    if active.capturing || !active.windows.is_empty() {
+        return;
+    }
+    active.capturing = true;
+    let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
+    let capturer = cx.global::<CaptureService>().0.clone();
+    let timer = settle.map(|d| cx.background_executor().timer(d));
+    let grab = cx.background_executor().spawn(async move {
+        if let Some(timer) = timer {
+            timer.await;
+        }
+        let mut capturer = capturer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("capture backend poisoned by an earlier panic"))?;
+        let Some(display) = capturer
+            .displays()?
+            .into_iter()
+            .find(|d| d.id == last.display_id)
+        else {
+            return Ok(None);
+        };
+        let frame = capturer.capture_display(&display)?;
+        let windows = capturer.windows().unwrap_or_default();
+        let targets = snap_targets(&display, &frame, &windows);
+        let Some(region) = last
+            .rect
+            .intersect(&Rect::new(0, 0, frame.width, frame.height))
+        else {
+            return Ok(None);
+        };
+        let meta = describe(region, frame.width, frame.height, &targets, display.id);
+        let crop = frame
+            .crop(region)
+            .ok_or_else(|| anyhow::anyhow!("region outside the display"))?;
+        anyhow::Ok(Some((crop, meta)))
+    });
+    cx.spawn(async move |cx| {
+        let shot = grab.await;
+        cx.update(|cx| {
+            cx.global_mut::<Active>().capturing = false;
+            match shot {
+                Ok(Some((frame, meta))) => keep(frame, meta, pressed_at, cx),
+                Ok(None) => {
+                    tracing::info!("last region's display is gone; selecting a new one");
+                    start(pressed_at, cx);
+                }
+                Err(e) => tracing::error!(error = %e, "repeat capture failed"),
+            }
+        });
+    })
+    .detach();
+}
+
 /// Closes every overlay of the session. `current` is the overlay whose event handler is
 /// running: it is mid-update, so it can only be removed directly, not through its handle.
 pub fn finish(current: &mut Window, cx: &mut App) {
@@ -266,16 +347,27 @@ pub fn finish(current: &mut Window, cx: &mut App) {
     }
 }
 
-/// Ends the session with a selection: closes the overlays at once, then encodes off the UI
-/// thread, puts the PNG on the clipboard, and keeps it in the library and captures folder.
+/// Ends the session with a selection: closes the overlays at once, remembers the region for
+/// "repeat last region", then hands the pixels to [`keep`].
 pub fn deliver(
     frame: Frame,
+    region: Rect,
     meta: Metadata,
     pressed_at: Instant,
     current: &mut Window,
     cx: &mut App,
 ) {
     finish(current, cx);
+    cx.set_global(LastRegion {
+        display_id: frame.display_id,
+        rect: region,
+    });
+    keep(frame, meta, pressed_at, cx);
+}
+
+/// Encodes a finished capture off the UI thread, puts the PNG on the clipboard, and keeps it
+/// in the library and the captures folder.
+fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
     #[cfg(target_os = "linux")]
     let clipboard = cx.global::<Clipboard>().0.clone();
     let library = cx.global::<LibraryService>().0.clone();
@@ -307,31 +399,43 @@ pub fn deliver(
             "on the clipboard (from hotkey, including selection time)"
         );
         let keep = cx.background_executor().spawn(async move {
+            let mut stored = None;
             if let Some(library) = library {
                 let added = library
                     .lock()
                     .map_err(|_| anyhow::anyhow!("library poisoned by an earlier panic"))
                     .and_then(|mut lib| {
-                        Ok(lib.add(&NewCapture {
+                        let id = lib.add(&NewCapture {
                             png: &png,
                             rgba: &rgba,
                             width,
                             height,
                             meta,
-                        })?)
+                        })?;
+                        let thumb = lib.thumb_path_of(&lib.get(id)?);
+                        Ok((id, thumb))
                     });
                 match added {
-                    Ok(id) => tracing::info!(id, "added to the library"),
+                    Ok((id, thumb)) => {
+                        tracing::info!(id, "added to the library");
+                        stored = Some((id, thumb));
+                    }
                     Err(e) => tracing::error!(error = %e, "adding to the library failed"),
                 }
             }
-            output::save(&png)
+            match output::save(&png) {
+                Ok(path) => tracing::info!(path = %path.display(), "saved"),
+                Err(e) => tracing::error!(error = %e, "saving the capture failed"),
+            }
+            stored
         });
-        match keep.await {
-            Ok(path) => tracing::info!(path = %path.display(), "saved"),
-            Err(e) => tracing::error!(error = %e, "saving the capture failed"),
-        }
-        cx.update(crate::library_view::notify_changed);
+        let stored = keep.await;
+        cx.update(|cx| {
+            crate::library_view::notify_changed(cx);
+            if let Some((id, thumb)) = stored {
+                crate::toast::show(id, thumb, cx);
+            }
+        });
     })
     .detach();
 }

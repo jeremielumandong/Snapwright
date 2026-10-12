@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end overlay test under Xvfb: hotkey, overlay timing, Esc, drag-select, click,
-# keyboard adjust, colour copy, clipboard.
+# keyboard adjust, repeat last region, colour copy, clipboard, preview and library.
 # Usage: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh <target dir>
 # Needs xdotool, xclip, xsetroot (x11-xserver-utils), ImageMagick and a Vulkan driver.
 set -euo pipefail
@@ -56,6 +56,12 @@ for xy in "0 0" "7 3" "40 21"; do
     || fail "adjusted region moved wrong at $1,$2"
 done
 
+# 4b. Repeat last region grabs the same region again, with no overlay.
+xdotool key ctrl+alt+shift+2; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/repeat.png"
+[ "$(compare -metric AE "$OUT/repeat.png" "$OUT/adjusted.png" null: 2>&1)" = "0" ] \
+  || fail "repeat did not capture the same region"
+
 # 5. C copies the colour under the pointer as hex.
 xdotool key ctrl+shift+2; sleep 1
 xdotool mousemove 301 301; sleep 0.3
@@ -63,6 +69,15 @@ xdotool key c; sleep 1
 want=$(pixel "$OUT/after.png" 301 301 | sed -E 's/srgba?\(([0-9]+),([0-9]+),([0-9]+).*/\1 \2 \3/' | xargs printf '#%02X%02X%02X')
 got=$(timeout 5 xclip -selection clipboard -o || true)
 [ "$got" = "$want" ] || fail "colour copy: got '$got', want $want"
+
+# 6. After a capture, a preview shows bottom right; clicking it opens the library.
+xdotool key ctrl+shift+2; sleep 1
+xdotool mousemove 100 100 mousedown 1 mousemove 300 200 mousemove 500 300; sleep 0.3
+xdotool mouseup 1; sleep 1.5
+"$BIN/snapwright" capture -o "$OUT/toast.png" 2>/dev/null
+[ "$(pixel "$OUT/toast.png" 1470 975)" != "$(pixel "$OUT/after.png" 1470 975)" ] || fail "no preview after capture"
+xdotool mousemove 1470 900 click 1; sleep 3
+xdotool search --name "Snapwright Library" >/dev/null || fail "clicking the preview did not open the library"
 
 grep -E "overlay visible|on the clipboard" "$OUT/app.log" | sed 's/\x1b\[[0-9;]*m//g'
 echo "PASS"
