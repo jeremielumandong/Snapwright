@@ -51,6 +51,7 @@ libc = "0.2"
 
 # Windows
 windows = "0.62"
+raw-window-handle = "0.6"
 
 # macOS
 objc2 = "0.6"

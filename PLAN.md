@@ -64,6 +64,11 @@ Gate: the team uses it daily with no capture lost in two weeks.
       the library window (tray > Open library, or `--library`) has search, tags, notes, trash
       and copy. URLs need per-browser support and are left empty for now.
 - [ ] `snapwright-bench` hotkey-to-clipboard harness in CI; signed builds.
+      Note: harness done: `scripts/latency-bench.sh` presses the real hotkeys under Xvfb and
+      reports p50/p95 for overlay, overlay over a preview, and repeat-to-clipboard; CI runs it
+      with loose budgets and uploads `latency.json`. It caught the preview adding 120 ms to
+      repeats (fixed: 5.7 ms p50). Signed builds wait on an Apple Developer ID and a Windows
+      code-signing certificate.
 
 ## Phase 2: Public beta (weeks 15 to 26)
 
@@ -99,3 +104,6 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Editor: resize handles on the selected shape; zoom and pan for large captures; IME and
   caret movement in text; more fonts and a text background option.
 - Editor: per-tool remembered colour and width; a magnifier (callout) tool and spotlight.
+- Linux: the overlay waits 120 ms for an open preview to leave the screen (about 200 ms vs
+  70 ms under Xvfb). Measure real compositors and shorten `toast::SETTLE`, or keep the preview
+  hidden from the grab another way.

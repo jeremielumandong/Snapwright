@@ -6300,6 +6300,7 @@ dependencies = [
  "gpui-kit",
  "image",
  "png 0.18.1",
+ "raw-window-handle",
  "snapwright-capture",
  "snapwright-editor",
  "snapwright-library",

@@ -29,6 +29,7 @@ xvfb-run -a -s "-screen 0 1920x1080x24" cargo test -p snapwright-capture --test 
 cargo run --release -p snapwright-cli -- bench --runs 100
 cargo run --release -p snapwright-app -- --capture-now   # SNAPWRIGHT_LOG=debug for timings
 xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
+xvfb-run -a -s "-screen 0 1920x1080x24" scripts/latency-bench.sh target/release   # p50/p95
 ```
 
 Linux builds of the app need `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
