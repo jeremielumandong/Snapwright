@@ -13,13 +13,24 @@ Gate: hotkey to overlay under 50 ms (p95) on macOS, Windows and X11.
       Note: X11 grabs 2560x1440 at 3.9 ms p50 under Xvfb; macOS and Windows need a real
       machine to measure (hosted runners lack permission or a GPU).
 - [x] P0-3 `snapwright` CLI: `displays`, `capture`, `bench`.
-- [ ] P0-4 `snapwright-app`: gpui-kit shell, resident process, tray icon (`tray-icon`).
-- [ ] P0-5 Global hotkey (`global-hotkey`) that captures every display.
-- [ ] P0-6 Overlay: one borderless top-most window per display showing the frozen frame;
-      drag to select, arrow keys nudge, Enter copies, Esc cancels. Loupe with pixel colour.
-- [ ] P0-7 Copy to clipboard (PNG) and save to the captures folder.
-- [ ] P0-8 Timing: hotkey to overlay visible, selection to clipboard; logged and in `bench`.
+- [x] P0-4 `snapwright-app`: gpui-kit shell and resident process, with a hidden window at
+      launch that sets up the GPU before the first hotkey. Tray icon moved to P0-10.
+- [x] P0-5 Global hotkey (`global-hotkey`): Ctrl+Shift+2, Cmd+Shift+2 on macOS.
+- [x] P0-6 Overlay: one borderless pop-up window per display showing the frozen frame
+      (BGRA straight into `RenderImage`, no copy); drag to select with a size label, Enter
+      or release copies, a click takes the whole display, Esc cancels.
+      Note: under Xvfb with a software GPU (llvmpipe), capture takes 7 to 16 ms and the
+      overlay is visible 66 to 112 ms after the hotkey. Arrow-key nudge and loupe moved to P0-11.
+- [x] P0-7 Copy to clipboard (PNG; `arboard` on Linux, GPUI elsewhere) and save to
+      `Pictures/Snapwright`.
+- [x] P0-8 Timing logged: hotkey to overlay visible, hotkey to clipboard.
+      `scripts/overlay-e2e.sh` checks the whole flow under Xvfb in CI.
 - [ ] P0-9 Measure on real macOS, Windows and X11 machines; record numbers here.
+- [ ] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
+- [ ] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
+      with pixel colour; window snapping preview.
+- [ ] P0-12 Pre-create one hidden overlay window per display and reuse it, if real-hardware
+      numbers show window creation dominates.
 
 ## Phase 1: Alpha (weeks 5 to 14)
 
