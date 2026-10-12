@@ -130,7 +130,7 @@ impl Overlay {
         };
         let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
         let meta = session::describe(r, self.width, self.height, &self.targets, self.display_id);
-        session::deliver(frame, meta, self.pressed_at, window, cx);
+        session::deliver(frame, r, meta, self.pressed_at, window, cx);
     }
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {

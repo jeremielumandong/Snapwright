@@ -78,3 +78,11 @@ SQLite, MIT). Every capture is also still written to `Pictures/Snapwright` so pe
 plain file where they expect one; that copy becomes a setting once settings exist. Search
 matches word prefixes across app, title, URL, note, tags and recognised text; FTS5 syntax in
 what people type is treated as plain words.
+
+## 2026-10-12: Repeat-last-region hotkey and delayed capture
+
+Repeat last region is Ctrl+Alt+Shift+2 (Cmd+Option+Shift+2 on macOS), next to the capture
+hotkey and clear of the system's Cmd+Shift+3/4/5. It grabs the same display and crops the same
+frame pixels with no overlay. Delayed capture has no hotkey yet: tray "Capture in 3 seconds"
+or `--capture-in=N`. Hotkeys another app owns are skipped with a warning instead of failing
+the rest.

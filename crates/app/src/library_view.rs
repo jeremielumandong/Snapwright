@@ -47,8 +47,23 @@ pub fn notify_changed(cx: &mut App) {
 struct LibraryWindow(Option<AnyWindowHandle>);
 impl Global for LibraryWindow {}
 
+/// A capture the library window should select once it has loaded.
+#[derive(Default)]
+struct PendingSelect(Option<i64>);
+impl Global for PendingSelect {}
+
 /// Opens the library window, or brings it to the front.
 pub fn open(cx: &mut App) {
+    open_at(None, cx);
+}
+
+/// Opens the library window with capture `id` selected.
+pub fn open_at(id: Option<i64>, cx: &mut App) {
+    if id.is_some() {
+        cx.set_global(PendingSelect(id));
+        // An open window reloads on this and picks the selection up.
+        notify_changed(cx);
+    }
     if let Some(h) = cx.default_global::<LibraryWindow>().0
         && h.update(cx, |_, window, _| window.activate_window())
             .is_ok()
@@ -112,9 +127,15 @@ pub struct LibraryView {
     total: usize,
     trashed: usize,
     selected: Option<i64>,
+    /// The note field shows another capture's note; refreshed on the next render.
+    note_stale: bool,
     generation: u64,
     grid_focus: FocusHandle,
     scroll: UniformListScrollHandle,
+    /// Item to scroll into view on the next render.
+    scroll_to: Option<usize>,
+    /// Clear the search box on the next render (which then reloads).
+    search_reset: bool,
     _subs: Vec<Subscription>,
 }
 
@@ -162,9 +183,12 @@ impl LibraryView {
             total: 0,
             trashed: 0,
             selected: None,
+            note_stale: false,
             generation: 0,
             grid_focus,
             scroll: UniformListScrollHandle::new(),
+            scroll_to: None,
+            search_reset: false,
             _subs: subs,
         };
         view.reload(cx);
@@ -223,6 +247,27 @@ impl LibraryView {
                 }
                 match loaded {
                     Ok(l) => {
+                        if let Some(id) = cx.default_global::<PendingSelect>().0.take() {
+                            match l.items.iter().position(|i| i.capture.id == id) {
+                                Some(ix) => {
+                                    this.selected = Some(id);
+                                    this.note_stale = true;
+                                    this.scroll_to = Some(ix);
+                                }
+                                // Not under this filter or search: show everything and look
+                                // again.
+                                None if this.filter != Filter::All
+                                    || !this.search.read(cx).value().is_empty() =>
+                                {
+                                    this.filter = Filter::All;
+                                    this.search_reset = true;
+                                    cx.set_global(PendingSelect(Some(id)));
+                                    cx.notify();
+                                    return;
+                                }
+                                None => {}
+                            }
+                        }
                         this.items = l.items;
                         this.tags = l.tags;
                         this.total = l.total;
@@ -705,6 +750,23 @@ impl LibraryView {
 
 impl Render for LibraryView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.note_stale) {
+            let note = self
+                .selected_item()
+                .map(|i| i.capture.note.clone())
+                .unwrap_or_default();
+            self.note.update(cx, |s, cx| s.set_value(note, window, cx));
+        }
+        if std::mem::take(&mut self.search_reset) {
+            // Clearing emits a change, which reloads; reload anyway in case it was empty.
+            self.search.update(cx, |s, cx| s.set_value("", window, cx));
+            self.reload(cx);
+        }
+        if let Some(ix) = self.scroll_to.take() {
+            let columns = self.columns(window);
+            self.scroll
+                .scroll_to_item(ix / columns, gpui_kit::ScrollStrategy::Center);
+        }
         let theme = cx.theme();
         let header = div()
             .flex()

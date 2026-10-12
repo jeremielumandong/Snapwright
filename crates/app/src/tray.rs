@@ -13,6 +13,8 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Capture,
+    CaptureDelayed,
+    RepeatLast,
     OpenLibrary,
     OpenFolder,
     Quit,
@@ -26,19 +28,44 @@ pub struct Tray {
 impl gpui_kit::Global for Tray {}
 
 const ID_CAPTURE: &str = "capture";
+const ID_DELAYED: &str = "capture-delayed";
+const ID_REPEAT: &str = "repeat-last";
 const ID_OPEN: &str = "open-folder";
 const ID_LIBRARY: &str = "library";
 const ID_QUIT: &str = "quit";
 
+/// Shortcut labels shown beside menu items.
+#[derive(Debug, Clone, Default)]
+pub struct Labels {
+    pub capture: Option<String>,
+    pub repeat: Option<String>,
+}
+
+fn with_shortcut(text: &str, shortcut: Option<&String>) -> String {
+    match shortcut {
+        Some(k) => format!("{text}\t{k}"),
+        None => text.to_owned(),
+    }
+}
+
 /// Creates the tray icon. Call on the main thread once the app is running.
-pub fn create(hotkey_label: Option<&str>) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
-    let capture_label = match hotkey_label {
-        Some(k) => format!("Capture region\t{k}"),
-        None => "Capture region".to_owned(),
-    };
+pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
     let menu = Menu::new();
     menu.append_items(&[
-        &MenuItem::with_id(ID_CAPTURE, capture_label, true, None),
+        &MenuItem::with_id(
+            ID_CAPTURE,
+            with_shortcut("Capture region", labels.capture.as_ref()),
+            true,
+            None,
+        ),
+        &MenuItem::with_id(ID_DELAYED, "Capture in 3 seconds", true, None),
+        &MenuItem::with_id(
+            ID_REPEAT,
+            with_shortcut("Repeat last region", labels.repeat.as_ref()),
+            true,
+            None,
+        ),
+        &PredefinedMenuItem::separator(),
         &MenuItem::with_id(ID_LIBRARY, "Open library", true, None),
         &MenuItem::with_id(ID_OPEN, "Open captures folder", true, None),
         &PredefinedMenuItem::separator(),
@@ -75,6 +102,8 @@ pub fn create(hotkey_label: Option<&str>) -> Result<(Tray, mpsc::UnboundedReceiv
 fn action_for(id: &MenuId) -> Option<Action> {
     match id.as_ref() {
         ID_CAPTURE => Some(Action::Capture),
+        ID_DELAYED => Some(Action::CaptureDelayed),
+        ID_REPEAT => Some(Action::RepeatLast),
         ID_LIBRARY => Some(Action::OpenLibrary),
         ID_OPEN => Some(Action::OpenFolder),
         ID_QUIT => Some(Action::Quit),
@@ -129,6 +158,14 @@ mod tests {
     #[test]
     fn menu_ids_map_to_actions() {
         assert_eq!(action_for(&MenuId::new(ID_CAPTURE)), Some(Action::Capture));
+        assert_eq!(
+            action_for(&MenuId::new(ID_DELAYED)),
+            Some(Action::CaptureDelayed)
+        );
+        assert_eq!(
+            action_for(&MenuId::new(ID_REPEAT)),
+            Some(Action::RepeatLast)
+        );
         assert_eq!(action_for(&MenuId::new(ID_OPEN)), Some(Action::OpenFolder));
         assert_eq!(
             action_for(&MenuId::new(ID_LIBRARY)),
