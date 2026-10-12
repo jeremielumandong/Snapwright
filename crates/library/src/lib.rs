@@ -5,6 +5,9 @@
 //! * Thumbnails (at most [`THUMB_MAX`] pixels on the long side) live in `thumbs/`.
 //! * Metadata, tags and a full-text index (SQLite FTS5) live in `library.sqlite3`.
 //!
+//! * Edits never touch the original: the editor's scene (JSON) is stored with the capture and
+//!   its rendered result is a second image in the store, shown in place of the original.
+//!
 //! Deleting moves a capture to the trash; [`Library::purge_trash`] removes it for good, along
 //! with its files once no other capture shares them.
 
@@ -94,6 +97,26 @@ pub struct NewCapture<'a> {
     pub meta: Metadata,
 }
 
+/// A rendered edit to store: its PNG encoding and the RGBA pixels it was encoded from.
+pub struct EditedImage<'a> {
+    pub png: &'a [u8],
+    pub rgba: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The edited version of a capture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    /// BLAKE3 of the rendered PNG, hex.
+    pub hash: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+    /// The editor's scene, to reopen the edit where it was left.
+    pub scene: String,
+}
+
 /// A stored capture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {
@@ -112,6 +135,23 @@ pub struct Capture {
     /// Text recognised in the image (filled by OCR later).
     pub text: String,
     pub trashed: bool,
+    /// The annotated version, if the capture was edited.
+    pub edit: Option<Edit>,
+}
+
+impl Capture {
+    /// Size of the image shown for this capture: the edit's if edited, else the original's.
+    pub fn shown_size(&self) -> (u32, u32) {
+        match &self.edit {
+            Some(e) => (e.width, e.height),
+            None => (self.width, self.height),
+        }
+    }
+
+    /// PNG size in bytes of the image shown for this capture.
+    pub fn shown_bytes(&self) -> u64 {
+        self.edit.as_ref().map_or(self.bytes, |e| e.bytes)
+    }
 }
 
 /// Which captures to list.
@@ -139,7 +179,7 @@ pub struct Library {
     db: Connection,
 }
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 impl Library {
     /// Opens (creating if needed) the library in `root`.
@@ -364,8 +404,11 @@ impl Library {
     pub fn purge_trash(&mut self) -> Result<usize> {
         let tx = self.db.transaction()?;
         let hashes: Vec<String> = {
-            let mut stmt =
-                tx.prepare("SELECT DISTINCT hash FROM captures WHERE deleted_ms IS NOT NULL")?;
+            let mut stmt = tx.prepare(
+                "SELECT hash FROM captures WHERE deleted_ms IS NOT NULL
+                            UNION SELECT edit_hash FROM captures
+                            WHERE deleted_ms IS NOT NULL AND edit_hash IS NOT NULL",
+            )?;
             stmt.query_map([], |r| r.get(0))?
                 .collect::<Result<_, _>>()?
         };
@@ -377,12 +420,7 @@ impl Library {
         let n = tx.execute("DELETE FROM captures WHERE deleted_ms IS NOT NULL", [])?;
         let mut orphans = Vec::new();
         for hash in hashes {
-            let used: bool = tx.query_row(
-                "SELECT EXISTS (SELECT 1 FROM captures WHERE hash = ?1)",
-                [&hash],
-                |r| r.get(0),
-            )?;
-            if !used {
+            if !is_used(&tx, &hash)? {
                 orphans.push(hash);
             }
         }
@@ -398,14 +436,74 @@ impl Library {
         Ok(n)
     }
 
-    /// Where a capture's PNG lives.
+    /// Stores an edit of capture `id`: the rendered image (once per distinct image) and its
+    /// thumbnail, and the scene that produced it. Replaces any earlier edit.
+    pub fn save_edit(&mut self, id: i64, scene: &str, image: &EditedImage<'_>) -> Result<()> {
+        let before = self.get(id)?;
+        let hash = blake3::hash(image.png).to_hex().to_string();
+        store::write_once(&self.image_path(&hash), image.png)?;
+        let thumb_path = self.thumb_path(&hash);
+        if !thumb_path.exists() {
+            let thumb = store::thumbnail(image.rgba, image.width, image.height, THUMB_MAX)?;
+            store::write_once(&thumb_path, &thumb)?;
+        }
+        self.db.execute(
+            "UPDATE captures SET edit_hash = ?2, edit_width = ?3, edit_height = ?4,
+                                 edit_bytes = ?5, scene = ?6
+             WHERE id = ?1",
+            params![
+                id,
+                hash,
+                image.width,
+                image.height,
+                image.png.len() as i64,
+                scene
+            ],
+        )?;
+        if let Some(old) = before.edit
+            && old.hash != hash
+        {
+            self.remove_if_unused(&old.hash)?;
+        }
+        Ok(())
+    }
+
+    /// Drops the edit of capture `id`, going back to the image as captured.
+    pub fn revert_edit(&mut self, id: i64) -> Result<()> {
+        let before = self.get(id)?;
+        self.db.execute(
+            "UPDATE captures SET edit_hash = NULL, edit_width = NULL, edit_height = NULL,
+                                 edit_bytes = NULL, scene = NULL
+             WHERE id = ?1",
+            [id],
+        )?;
+        if let Some(old) = before.edit {
+            self.remove_if_unused(&old.hash)?;
+        }
+        Ok(())
+    }
+
+    fn remove_if_unused(&self, hash: &str) -> Result<()> {
+        if !is_used(&self.db, hash)? {
+            store::remove(&self.image_path(hash));
+            store::remove(&self.thumb_path(hash));
+        }
+        Ok(())
+    }
+
+    /// Where the image shown for a capture lives: the edit if there is one, else the original.
     pub fn image_path_of(&self, capture: &Capture) -> PathBuf {
+        self.image_path(capture.edit.as_ref().map_or(&capture.hash, |e| &e.hash))
+    }
+
+    /// Where a capture's original, unedited PNG lives.
+    pub fn original_path_of(&self, capture: &Capture) -> PathBuf {
         self.image_path(&capture.hash)
     }
 
-    /// Where a capture's thumbnail lives.
+    /// Where the thumbnail of the image shown for a capture lives.
     pub fn thumb_path_of(&self, capture: &Capture) -> PathBuf {
-        self.thumb_path(&capture.hash)
+        self.thumb_path(capture.edit.as_ref().map_or(&capture.hash, |e| &e.hash))
     }
 
     fn image_path(&self, hash: &str) -> PathBuf {
@@ -432,7 +530,8 @@ impl Library {
 }
 
 const COLUMNS: &str = "c.id, c.hash, c.created_ms, c.width, c.height, c.bytes, c.source, c.app,
-    c.window_title, c.url, c.display_id, c.note, c.text, c.deleted_ms";
+    c.window_title, c.url, c.display_id, c.note, c.text, c.deleted_ms,
+    c.edit_hash, c.edit_width, c.edit_height, c.edit_bytes, c.scene";
 
 fn capture_from_row(r: &Row<'_>) -> rusqlite::Result<Capture> {
     Ok(Capture {
@@ -453,7 +552,26 @@ fn capture_from_row(r: &Row<'_>) -> rusqlite::Result<Capture> {
         text: r.get(12)?,
         tags: Vec::new(),
         trashed: r.get::<_, Option<i64>>(13)?.is_some(),
+        edit: match r.get::<_, Option<String>>(14)? {
+            Some(hash) => Some(Edit {
+                hash,
+                width: r.get::<_, Option<u32>>(15)?.unwrap_or_default(),
+                height: r.get::<_, Option<u32>>(16)?.unwrap_or_default(),
+                bytes: r.get::<_, Option<i64>>(17)?.unwrap_or_default() as u64,
+                scene: r.get::<_, Option<String>>(18)?.unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
+}
+
+/// Whether any capture still uses the image `hash`, as its original or its edit.
+fn is_used(db: &Connection, hash: &str) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM captures WHERE hash = ?1 OR edit_hash = ?1)",
+        [hash],
+        |r| r.get(0),
+    )?)
 }
 
 /// Rewrites a capture's full-text row from its current fields and tags.
@@ -510,6 +628,19 @@ fn migrate(db: &Connection) -> Result<()> {
                  tokenize = 'unicode61 remove_diacritics 2'
              );
              PRAGMA user_version = 1;
+             COMMIT;",
+        )?;
+    }
+    if version < 2 {
+        db.execute_batch(
+            "BEGIN;
+             ALTER TABLE captures ADD COLUMN edit_hash   TEXT;
+             ALTER TABLE captures ADD COLUMN edit_width  INTEGER;
+             ALTER TABLE captures ADD COLUMN edit_height INTEGER;
+             ALTER TABLE captures ADD COLUMN edit_bytes  INTEGER;
+             ALTER TABLE captures ADD COLUMN scene       TEXT;
+             CREATE INDEX captures_edit_hash ON captures (edit_hash);
+             PRAGMA user_version = 2;
              COMMIT;",
         )?;
     }

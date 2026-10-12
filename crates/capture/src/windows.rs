@@ -434,3 +434,16 @@ fn list_windows() -> Result<Vec<WindowInfo>> {
     }
     Ok(out)
 }
+
+pub(crate) fn exclude_window(hwnd: isize) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    // SAFETY: SetWindowDisplayAffinity validates the handle and fails on one that is not a
+    // window of this process; nothing is dereferenced here.
+    unsafe {
+        SetWindowDisplayAffinity(HWND(hwnd as *mut core::ffi::c_void), WDA_EXCLUDEFROMCAPTURE)
+    }
+    .is_ok()
+}

@@ -281,3 +281,87 @@ fn bad_pixels_are_rejected_before_anything_is_recorded() {
     assert!(matches!(err, Err(Error::Image(_))));
     assert!(f.lib.list(&Query::default()).unwrap().is_empty());
 }
+
+fn edit(lib: &mut Library, id: i64, rgb: [u8; 3], scene: &str) {
+    let (png, rgba) = image(320, 200, rgb);
+    lib.save_edit(
+        id,
+        scene,
+        &EditedImage {
+            png: &png,
+            rgba: &rgba,
+            width: 320,
+            height: 200,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn edits_are_shown_in_place_of_the_original_and_can_be_reverted() {
+    let mut f = library();
+    let id = add(&mut f.lib, 1, [10, 20, 30], meta("Figma", "Board"));
+    let original = f.lib.image_path_of(&f.lib.get(id).unwrap());
+
+    edit(&mut f.lib, id, [200, 0, 0], r#"{"version":1,"shapes":[]}"#);
+    let c = f.lib.get(id).unwrap();
+    let first = c.edit.clone().unwrap();
+    assert_eq!(first.scene, r#"{"version":1,"shapes":[]}"#);
+    assert_eq!(c.shown_size(), (320, 200));
+    assert_eq!((c.width, c.height), (640, 360));
+    assert_ne!(f.lib.image_path_of(&c), original);
+    assert_eq!(f.lib.original_path_of(&c), original);
+    assert!(f.lib.image_path_of(&c).exists() && f.lib.thumb_path_of(&c).exists());
+    let first_path = f.lib.image_path_of(&c);
+
+    // A new edit replaces the old one, whose files go.
+    edit(&mut f.lib, id, [0, 200, 0], "{}");
+    let c = f.lib.get(id).unwrap();
+    assert_ne!(c.edit.as_ref().unwrap().hash, first.hash);
+    assert!(!first_path.exists());
+
+    let edited = f.lib.image_path_of(&c);
+    f.lib.revert_edit(id).unwrap();
+    let c = f.lib.get(id).unwrap();
+    assert_eq!(c.edit, None);
+    assert_eq!(f.lib.image_path_of(&c), original);
+    assert!(original.exists() && !edited.exists());
+}
+
+#[test]
+fn purging_removes_edits_too() {
+    let mut f = library();
+    let id = add(&mut f.lib, 1, [10, 20, 30], meta("a", "b"));
+    edit(&mut f.lib, id, [1, 2, 3], "{}");
+    let c = f.lib.get(id).unwrap();
+    let (shown, original) = (f.lib.image_path_of(&c), f.lib.original_path_of(&c));
+    f.lib.trash(id).unwrap();
+    assert_eq!(f.lib.purge_trash().unwrap(), 1);
+    assert!(!shown.exists() && !original.exists());
+}
+
+#[test]
+fn version_1_libraries_upgrade_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = {
+        let mut lib = Library::open(dir.path()).unwrap();
+        add(&mut lib, 5, [1, 1, 1], meta("Safari", "Docs"))
+    };
+    // Turn the database back into a version 1 library.
+    let db = Connection::open(dir.path().join("library.sqlite3")).unwrap();
+    db.execute_batch(
+        "DROP INDEX captures_edit_hash;
+         ALTER TABLE captures DROP COLUMN edit_hash;
+         ALTER TABLE captures DROP COLUMN edit_width;
+         ALTER TABLE captures DROP COLUMN edit_height;
+         ALTER TABLE captures DROP COLUMN edit_bytes;
+         ALTER TABLE captures DROP COLUMN scene;
+         PRAGMA user_version = 1;",
+    )
+    .unwrap();
+    drop(db);
+    let mut lib = Library::open(dir.path()).unwrap();
+    assert_eq!(lib.get(id).unwrap().meta.app, "Safari");
+    edit(&mut lib, id, [9, 9, 9], "{}");
+    assert!(lib.get(id).unwrap().edit.is_some());
+}
