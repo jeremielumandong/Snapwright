@@ -21,6 +21,35 @@ pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Decodes a PNG to 8-bit RGBA: `(width, height, pixels)`.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+pub fn decode_png(png: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(png));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size().context("PNG too large")?];
+    let info = reader.next_frame(&mut buf)?;
+    buf.truncate(info.buffer_size());
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => buf
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b]| [r, g, b, 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => buf
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .flat_map(|&[v, a]| [v, v, v, a])
+            .collect(),
+        png::ColorType::Grayscale => buf.iter().flat_map(|&v| [v, v, v, 255]).collect(),
+        png::ColorType::Indexed => anyhow::bail!("indexed PNG was not expanded"),
+    };
+    Ok((info.width, info.height, rgba))
+}
+
 /// The folder captures are saved to: `Pictures/Snapwright`, or `~/Snapwright` without one.
 pub fn captures_dir() -> Result<PathBuf> {
     let dirs = directories::UserDirs::new().context("no home directory")?;
@@ -29,6 +58,12 @@ pub fn captures_dir() -> Result<PathBuf> {
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs.home_dir().to_path_buf());
     Ok(base.join("Snapwright"))
+}
+
+/// Where the capture library lives: the platform's data folder for Snapwright.
+pub fn library_dir() -> Result<PathBuf> {
+    let dirs = directories::ProjectDirs::from("", "", "Snapwright").context("no home directory")?;
+    Ok(dirs.data_dir().join("library"))
 }
 
 /// Saves PNG bytes to a new file in the captures folder and returns its path.
@@ -74,5 +109,18 @@ impl LinuxClipboard {
             bytes: rgba.into(),
         })?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn png_round_trips() {
+        let rgba: Vec<u8> = (0..6 * 4).map(|i| i as u8 * 10).collect();
+        let png = encode_png(3, 2, &rgba).unwrap();
+        assert_eq!(decode_png(&png).unwrap(), (3, 2, rgba));
     }
 }

@@ -30,22 +30,35 @@ Gate: hotkey to overlay under 50 ms (p95) on macOS, Windows and X11.
       macOS (ScreenCaptureKit, 1024x768): first 273 ms, p50 15.5 ms, p95 26.9 ms.
       Windows (DXGI, 1024x768): first 10.7 ms, p50 0.57 ms (unchanged screen reuses the
       last frame). X11 (Xvfb, 2560x1440): first 26 ms, p50 2.5 ms, p95 2.7 ms.
-- [ ] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
-- [ ] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
+- [x] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
+      Note: Linux uses StatusNotifierItem (`ksni`), no GTK.
+- [x] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
       with pixel colour; window snapping preview.
+      Note: hover highlights the window under the pointer, a click takes it; Shift on release
+      keeps a drag open for adjusting; `C` copies the colour under the pointer as hex.
+      `Capturer::windows()` and `snapwright windows` list windows on all three OSes.
 - [ ] P0-12 Pre-create one hidden overlay window per display and reuse it, if real-hardware
-      numbers show window creation dominates.
+      numbers show window creation dominates. Waiting on P0-9: GPUI has no per-window
+      hide/show, so this needs a gpui-fast patch (see DECISIONS).
 
 ## Phase 1: Alpha (weeks 5 to 14)
 
 Gate: the team uses it daily with no capture lost in two weeks.
 
-- [ ] Window capture with snapping; capture delay timer; repeat last region.
-- [ ] Quick-access thumbnail after capture.
+- [x] Window capture with snapping; capture delay timer; repeat last region.
+      Note: snapping landed in P0-11. Tray "Capture in 3 seconds" (or `--capture-in=N`)
+      shows a countdown that closes before the grab. Ctrl/Cmd+Alt+Shift+2 repeats the last
+      region with no overlay: 5 ms from hotkey to clipboard under Xvfb.
+- [x] Quick-access thumbnail after capture.
+      Note: bottom-right preview for 6 s (longer while hovered); a click opens the capture in
+      the library; a new capture closes it first so it never shows up in a grab.
 - [ ] Editor on Emulsion's engine: arrow, rectangle, ellipse, line, text, highlight, blur and
       pixelate, step counter, crop; undo and redo; non-destructive scene saved beside the image.
-- [ ] `snapwright-library`: SQLite + FTS5, content-addressed store, metadata (app, window
+- [x] `snapwright-library`: SQLite + FTS5, content-addressed store, metadata (app, window
       title, URL, display, time), thumbnails, grid with virtual scrolling, search, tags.
+      Note: every capture lands in the library with the app and title of the window under it;
+      the library window (tray > Open library, or `--library`) has search, tags, notes, trash
+      and copy. URLs need per-browser support and are left empty for now.
 - [ ] `snapwright-bench` hotkey-to-clipboard harness in CI; signed builds.
 
 ## Phase 2: Public beta (weeks 15 to 26)
@@ -73,3 +86,9 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Windows: honour `DXGI_OUTPUT_DESC::Rotation` for portrait monitors.
 - Windows: HDR desktops through `DuplicateOutput1` with an FP16 format, tone mapped to sRGB.
 - macOS: display names from `NSScreen.localizedName`.
+- macOS: confirm `SCShareableContent.windows` comes front to back on a real machine; if not,
+  order by `CGWindowListCopyWindowInfo`.
+- Library: fill `url` from browsers (macOS Accessibility / AppleScript, Windows UI Automation).
+- Library: drag a thumbnail out to other apps; multi-select; import existing images.
+- Captures folder: make the extra copy in `Pictures/Snapwright` a setting once settings exist.
+- gpui-fast: upstream a fix for the 2 px X11 window shift, then drop `session::popup_bounds`.

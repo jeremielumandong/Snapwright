@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/app", "crates/capture", "crates/cli"]
+members = ["crates/app", "crates/capture", "crates/cli", "crates/library"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ repository = "https://github.com/jeremielumandong/snapwright"
 [workspace.dependencies]
 # internal
 snapwright-capture = { path = "crates/capture" }
+snapwright-library = { path = "crates/library" }
 
 # common
 anyhow = "1"
@@ -21,11 +22,18 @@ clap = { version = "4.6", features = ["derive"] }
 png = "0.18"
 futures = "0.3"
 directories = "6"
+tempfile = "3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# library
+rusqlite = { version = "0.40", features = ["bundled"] }
+blake3 = "1.8"
 
 # UI: gpui-kit is the facade over gpui (gpui-pre =0.3.8) + gpui-component 0.7.1, kept in
 # lockstep, as in Switchyard. `image` must match the version gpui links (its `Frame` type).
 gpui-kit = "=0.7.1"
 image = { version = "0.25", default-features = false }
+tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
 global-hotkey = "0.8"
 # Linux clipboard images: GPUI's X11 clipboard writes text only.
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
@@ -42,7 +50,7 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFData", "CFCGTypes"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGDirectDisplay", "objc2"] }
-objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "libc", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
 block2 = "0.6"
 
 [workspace.lints.rust]

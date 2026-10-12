@@ -41,3 +41,48 @@ for it. Later overlays then show in 66 to 112 ms on the same software renderer.
 GPUI's X11 clipboard writes text only. On Linux the app puts captures on the clipboard with
 `arboard` (MIT/Apache-2.0), kept alive for the app's life because on X11 the owner serves
 every paste. macOS and Windows use GPUI's clipboard, which supports PNG.
+
+## 2026-10-12: Tray icon through `tray-icon` with the `ksni` backend
+
+`tray-icon` (MIT/Apache-2.0) gives the native status item on macOS and Windows. On Linux its
+default backend needs GTK and libappindicator; the `ksni` backend speaks
+StatusNotifierItem over D-Bus instead, so the app links no GTK. Without a D-Bus session (as
+under Xvfb) the tray is skipped with a warning and the hotkey still works.
+
+## 2026-10-12: Selection: click snaps to windows, Shift on release keeps it open
+
+Hovering highlights the frontmost window under the pointer and a click takes it; on bare
+desktop a click takes the display. A drag still copies on release, the fastest path. Holding
+Shift on release keeps the region open: drag inside to move it, arrows nudge, Shift+arrows
+resize (Ctrl/Cmd for 10 px), Enter copies. Windows are listed after the frames are grabbed
+and before any overlay opens, so ours are never in the list; the app also drops its own pid.
+
+## 2026-10-12: Overlay windows ask for 2 px less on X11
+
+gpui-fast's X11 backend creates every window 2 px right of the requested origin (a Zed
+workaround for GNOME). Override-redirect pop-ups keep the shift, so the frozen frame sat 2 px
+off the real screen. `session::open_overlays` asks for `x - 2`; a gpui-fast fix would let us
+drop that.
+
+## 2026-10-12: P0-12 (reused overlay windows) waits for real-hardware numbers
+
+GPUI has no per-window hide or show, so reusing overlay windows means patching gpui-fast.
+Under Xvfb the overlay appears 66 to 95 ms after the hotkey, but that is a software renderer.
+Do it only if P0-9's numbers on real machines show window creation is the bottleneck.
+
+## 2026-10-12: Library store and the captures folder
+
+The library keeps each image once, named by the BLAKE3 hash of its PNG, under the platform
+data folder, with metadata, tags and an FTS5 index in SQLite (`rusqlite` with bundled
+SQLite, MIT). Every capture is also still written to `Pictures/Snapwright` so people find a
+plain file where they expect one; that copy becomes a setting once settings exist. Search
+matches word prefixes across app, title, URL, note, tags and recognised text; FTS5 syntax in
+what people type is treated as plain words.
+
+## 2026-10-12: Repeat-last-region hotkey and delayed capture
+
+Repeat last region is Ctrl+Alt+Shift+2 (Cmd+Option+Shift+2 on macOS), next to the capture
+hotkey and clear of the system's Cmd+Shift+3/4/5. It grabs the same display and crops the same
+frame pixels with no overlay. Delayed capture has no hotkey yet: tray "Capture in 3 seconds"
+or `--capture-in=N`. Hotkeys another app owns are skipped with a warning instead of failing
+the rest.

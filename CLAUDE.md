@@ -46,9 +46,10 @@ CC_x86_64_pc_windows_msvc=clang cargo clippy -p snapwright-capture --target x86_
 
 ```
 crates/
-  app/      snapwright-app      GPUI binary: global hotkey, per-display overlay, clipboard, save
+  app/      snapwright-app      GPUI binary: global hotkey, tray, per-display overlay, clipboard, save
   capture/  snapwright-capture  Capturer, Display, Frame; one backend module per OS
-  cli/      snapwright-cli      `snapwright` binary: displays, capture, bench
+  cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
+  library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 ```
 
@@ -83,6 +84,19 @@ scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, x
 - GPUI: the first window pays for GPU setup (seconds on a software renderer). The app opens a
   hidden window at launch to take that cost before the first hotkey.
 - GPUI's X11 clipboard writes text only; images go through `arboard` on Linux.
+- GPUI's X11 backend creates windows 2 px right of the requested origin; override-redirect
+  pop-ups go through `session::popup_bounds`, which asks for 2 px less.
+- The selection logic lives in `selection.rs` in frame pixels with no GPUI types; test
+  interaction changes there first.
+- `tray-icon` on Linux needs a D-Bus session; without one the tray is skipped.
+- The library lives in the platform data folder (`~/.local/share/snapwright/library` on
+  Linux); tests that set `HOME` get their own. Library calls run on background threads
+  behind `session::LibraryService`'s mutex, never on the UI thread.
+- `cargo run --release -p snapwright-app -- --library` opens the library window at launch;
+  `--capture-in=3` starts a countdown capture.
+- Anything shown on screen right after a capture (the quick-access preview) must close
+  before the next grab: `session::start` and `repeat_last` dismiss it and wait
+  `toast::SETTLE`.
 - `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
   converted, so capture frames go in as they are. `image` must be the version GPUI links.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
