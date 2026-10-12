@@ -284,9 +284,24 @@ pub fn repeat_last(pressed_at: Instant, cx: &mut App) {
         return;
     }
     active.capturing = true;
-    let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
+    repeat_grab(last, pressed_at, false, false, cx);
+}
+
+/// What a repeat grab found.
+enum Repeat {
+    Shot(Frame, Metadata),
+    /// One of our own windows (the quick-access preview) covers the region.
+    Covered,
+    /// The display is gone or the region is off it.
+    Gone,
+}
+
+/// Grabs `last` again. The quick-access preview stays up unless it covers the region and the
+/// OS cannot keep it out of the capture (then it is closed and the grab retried once it has
+/// left the screen), so repeats in a row do not each wait for the previous one's preview.
+fn repeat_grab(last: LastRegion, pressed_at: Instant, retry: bool, settle: bool, cx: &mut App) {
     let capturer = cx.global::<CaptureService>().0.clone();
-    let timer = settle.map(|d| cx.background_executor().timer(d));
+    let timer = settle.then(|| cx.background_executor().timer(crate::toast::SETTLE));
     let grab = cx.background_executor().spawn(async move {
         if let Some(timer) = timer {
             timer.await;
@@ -299,38 +314,62 @@ pub fn repeat_last(pressed_at: Instant, cx: &mut App) {
             .into_iter()
             .find(|d| d.id == last.display_id)
         else {
-            return Ok(None);
+            return Ok(Repeat::Gone);
         };
-        let frame = capturer.capture_display(&display)?;
         let windows = capturer.windows().unwrap_or_default();
+        if !retry
+            && !snapwright_capture::EXCLUDES_OWN_WINDOWS
+            && own_window_covers(&display, &windows, last.rect)
+        {
+            return Ok(Repeat::Covered);
+        }
+        let frame = capturer.capture_display(&display)?;
         let targets = snap_targets(&display, &frame, &windows);
         let Some(region) = last
             .rect
             .intersect(&Rect::new(0, 0, frame.width, frame.height))
         else {
-            return Ok(None);
+            return Ok(Repeat::Gone);
         };
         let meta = describe(region, frame.width, frame.height, &targets, display.id);
         let crop = frame
             .crop(region)
             .ok_or_else(|| anyhow::anyhow!("region outside the display"))?;
-        anyhow::Ok(Some((crop, meta)))
+        anyhow::Ok(Repeat::Shot(crop, meta))
     });
     cx.spawn(async move |cx| {
         let shot = grab.await;
-        cx.update(|cx| {
-            cx.global_mut::<Active>().capturing = false;
-            match shot {
-                Ok(Some((frame, meta))) => keep(frame, meta, pressed_at, cx),
-                Ok(None) => {
-                    tracing::info!("last region's display is gone; selecting a new one");
-                    start(pressed_at, cx);
-                }
-                Err(e) => tracing::error!(error = %e, "repeat capture failed"),
+        cx.update(|cx| match shot {
+            Ok(Repeat::Shot(frame, meta)) => {
+                cx.global_mut::<Active>().capturing = false;
+                keep(frame, meta, pressed_at, cx);
+            }
+            Ok(Repeat::Covered) => {
+                let settle = crate::toast::dismiss(cx);
+                repeat_grab(last, pressed_at, true, settle, cx);
+            }
+            Ok(Repeat::Gone) => {
+                cx.global_mut::<Active>().capturing = false;
+                tracing::info!("last region's display is gone; selecting a new one");
+                start(pressed_at, cx);
+            }
+            Err(e) => {
+                cx.global_mut::<Active>().capturing = false;
+                tracing::error!(error = %e, "repeat capture failed");
             }
         });
     })
     .detach();
+}
+
+/// Whether one of this process's windows overlaps `region` (display-local pixels).
+fn own_window_covers(display: &Display, windows: &[WindowInfo], region: Rect) -> bool {
+    let own = std::process::id();
+    let b = display.bounds;
+    let global = Rect::new(b.x + region.x, b.y + region.y, region.width, region.height);
+    windows
+        .iter()
+        .any(|w| w.pid == own && w.bounds.intersect(&global).is_some())
 }
 
 /// Closes every overlay of the session. `current` is the overlay whose event handler is
@@ -438,6 +477,31 @@ fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
         });
     })
     .detach();
+}
+
+/// Puts an image already encoded as `png` (from these RGBA pixels) on the clipboard. Call it
+/// on the UI thread; on Linux the clipboard write itself is handed to a background thread.
+pub fn copy_image(width: u32, height: u32, rgba: Vec<u8>, png: Vec<u8>, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = png;
+        let clipboard = cx.global::<Clipboard>().0.clone();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(e) = clipboard.set_image(width, height, rgba) {
+                    tracing::error!(error = %e, "copying the image failed");
+                }
+            })
+            .detach();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (width, height, rgba);
+        cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+            ImageFormat::Png,
+            png,
+        )));
+    }
 }
 
 /// Puts a PNG file on the clipboard, reading (and on Linux decoding) it off the UI thread.

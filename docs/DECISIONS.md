@@ -86,3 +86,41 @@ hotkey and clear of the system's Cmd+Shift+3/4/5. It grabs the same display and 
 frame pixels with no overlay. Delayed capture has no hotkey yet: tray "Capture in 3 seconds"
 or `--capture-in=N`. Hotkeys another app owns are skipped with a warning instead of failing
 the rest.
+
+## 2026-10-12: Editor engine is a small crate on Emulsion's rasteriser, not emulsion-core
+
+Emulsion's `emulsion-core` carries documents, storyboards, diagrams and cosmic-text; pulling it
+in would multiply build time and binary size for what a screenshot editor needs. Snapwright's
+`snapwright-editor` instead keeps a small serde scene (arrow, line, rectangle, ellipse,
+highlight, text, step, blur, pixelate, crop) and renders it with tiny-skia 0.11, the rasteriser
+Emulsion uses, with Emulsion's Gaussian kernel ported (MIT). Text is laid out with ab_glyph and
+the bundled Geist font (OFL, copied from Emulsion's assets) as vector paths, so exports match on
+every OS. The preview is rendered by the same code as the export, on a background thread, so
+what the user sees is what gets copied.
+
+Redactions (blur, pixelate) always apply to the image's own pixels under every other shape, so
+nothing drawn later can be undone to reveal them, and exports contain no original pixels there.
+
+## 2026-10-12: Edits live in the library row (schema v2)
+
+"Saved beside the image" means: the scene JSON and the rendered image's hash are columns on the
+capture. The rendered image is a second content-addressed file with its own thumbnail and is
+what the library shows, copies and opens; the original file is never touched, and "Revert to
+original" drops the edit. Closing the editor saves; Done also copies. Old edit files are deleted
+once no capture uses them.
+
+## 2026-10-12: Our own windows stay out of captures where the OS allows
+
+The quick-access preview sits on screen for six seconds, often while the next capture starts.
+Closing it and waiting for the compositor cost 120 ms per capture, which the latency harness
+caught (repeat last region went from 5 ms to 128 ms). Now:
+
+- macOS: the ScreenCaptureKit filter excludes this application, so none of Snapwright's own
+  windows (preview, library, editor, overlay) are ever in a capture, and nothing waits.
+- Windows: the preview window is marked `WDA_EXCLUDEFROMCAPTURE` (Windows 10 2004+); when that
+  fails it falls back to closing and waiting.
+- Linux/X11 has no such switch. Repeat last region keeps the preview up unless it covers the
+  region; a new overlay still closes it and waits.
+
+Capturing Snapwright's own library or editor window on macOS is therefore not possible; if that
+turns out to matter, except those windows in the filter.

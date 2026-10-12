@@ -29,6 +29,7 @@ xvfb-run -a -s "-screen 0 1920x1080x24" cargo test -p snapwright-capture --test 
 cargo run --release -p snapwright-cli -- bench --runs 100
 cargo run --release -p snapwright-app -- --capture-now   # SNAPWRIGHT_LOG=debug for timings
 xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
+xvfb-run -a -s "-screen 0 1920x1080x24" scripts/latency-bench.sh target/release   # p50/p95
 ```
 
 Linux builds of the app need `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
@@ -49,6 +50,7 @@ crates/
   app/      snapwright-app      GPUI binary: global hotkey, tray, per-display overlay, clipboard, save
   capture/  snapwright-capture  Capturer, Display, Frame; one backend module per OS
   cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
+  editor/   snapwright-editor   annotation scene (shapes, crop), tiny-skia renderer, undo history
   library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 ```
@@ -92,6 +94,8 @@ scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, x
 - The library lives in the platform data folder (`~/.local/share/snapwright/library` on
   Linux); tests that set `HOME` get their own. Library calls run on background threads
   behind `session::LibraryService`'s mutex, never on the UI thread.
+- `cargo run --release -p snapwright-app -- --edit-latest` opens the newest capture in the editor;
+  `cargo run -p snapwright-editor --example sample -- out.png` renders every shape kind.
 - `cargo run --release -p snapwright-app -- --library` opens the library window at launch;
   `--capture-in=3` starts a countdown capture.
 - Anything shown on screen right after a capture (the quick-access preview) must close

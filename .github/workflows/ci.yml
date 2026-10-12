@@ -54,6 +54,20 @@ jobs:
       - name: Overlay end to end (Xvfb, software Vulkan)
         if: runner.os == 'Linux'
         run: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
+      - name: Hotkey latency (Xvfb, software Vulkan)
+        if: runner.os == 'Linux'
+        env:
+          E2E_OUT: ${{ runner.temp }}/latency
+        run: |
+          mkdir -p "$E2E_OUT"
+          xvfb-run -a -s "-screen 0 1920x1080x24" scripts/latency-bench.sh target/release
+      - name: Upload latency results
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: latency
+          path: ${{ runner.temp }}/latency/*.json
+          if-no-files-found: ignore
       # Hosted macOS runners have no Screen Recording permission and Windows runners only a
       # basic display adapter, so these record what happens without failing the build.
       - name: Capture smoke test (informational)

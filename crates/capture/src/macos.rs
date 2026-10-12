@@ -15,7 +15,8 @@ use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::{CGDataProvider, CGImage, CGMainDisplayID};
 use objc2_foundation::{NSArray, NSError};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCDisplay, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
+    SCContentFilter, SCDisplay, SCRunningApplication, SCScreenshotManager, SCShareableContent,
+    SCStreamConfiguration,
 };
 
 use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
@@ -210,19 +211,29 @@ fn load_content() -> Result<Retained<SCShareableContent>> {
 
 fn targets(content: &SCShareableContent) -> Vec<Target> {
     let main = CGMainDisplayID();
+    // This process's own windows (a capture preview, a toolbar) never belong in a capture.
+    let own = std::process::id() as libc::pid_t;
+    // SAFETY: plain getters on a delivered object.
+    let mine: Vec<Retained<SCRunningApplication>> = unsafe { content.applications() }
+        .iter()
+        // SAFETY: plain getter.
+        .filter(|a| unsafe { a.processID() } == own)
+        .collect();
+    let mine = NSArray::from_retained_slice(&mine);
     // SAFETY: plain getters on a delivered object.
     let displays = unsafe { content.displays() };
-    displays.iter().map(|d| target(&d, main)).collect()
+    displays.iter().map(|d| target(&d, &mine, main)).collect()
 }
 
-fn target(display: &SCDisplay, main: u32) -> Target {
-    let excluded = NSArray::new();
-    // SAFETY: a display from the current shareable content and an empty exclusion list.
+fn target(display: &SCDisplay, exclude: &NSArray<SCRunningApplication>, main: u32) -> Target {
+    let excepting = NSArray::new();
+    // SAFETY: a display and applications from the current shareable content.
     let filter = unsafe {
-        SCContentFilter::initWithDisplay_excludingWindows(
+        SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(
             SCContentFilter::alloc(),
             display,
-            &excluded,
+            exclude,
+            &excepting,
         )
     };
     // SAFETY: plain getters.
