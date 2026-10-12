@@ -69,3 +69,12 @@ drop that.
 GPUI has no per-window hide or show, so reusing overlay windows means patching gpui-fast.
 Under Xvfb the overlay appears 66 to 95 ms after the hotkey, but that is a software renderer.
 Do it only if P0-9's numbers on real machines show window creation is the bottleneck.
+
+## 2026-10-12: Library store and the captures folder
+
+The library keeps each image once, named by the BLAKE3 hash of its PNG, under the platform
+data folder, with metadata, tags and an FTS5 index in SQLite (`rusqlite` with bundled
+SQLite, MIT). Every capture is also still written to `Pictures/Snapwright` so people find a
+plain file where they expect one; that copy becomes a setting once settings exist. Search
+matches word prefixes across app, title, URL, note, tags and recognised text; FTS5 syntax in
+what people type is treated as plain words.

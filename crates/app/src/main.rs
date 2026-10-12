@@ -5,6 +5,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod hotkey;
+mod library_view;
 mod output;
 mod overlay;
 mod selection;
@@ -19,6 +20,8 @@ use tracing_subscriber::EnvFilter;
 
 /// `--capture-now` starts a capture as soon as the app is up (for tests and timing runs).
 const CAPTURE_NOW_ARG: &str = "--capture-now";
+/// `--library` opens the library window at launch.
+const LIBRARY_ARG: &str = "--library";
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -27,6 +30,7 @@ fn main() -> Result<()> {
         )
         .init();
     let capture_now = std::env::args().any(|a| a == CAPTURE_NOW_ARG);
+    let show_library = std::env::args().any(|a| a == LIBRARY_ARG);
 
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
@@ -68,6 +72,9 @@ fn main() -> Result<()> {
         if capture_now {
             session::start(Instant::now(), cx);
         }
+        if show_library {
+            library_view::open(cx);
+        }
     });
     Ok(())
 }
@@ -75,6 +82,7 @@ fn main() -> Result<()> {
 fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
     match action {
         tray::Action::Capture => session::start(Instant::now(), cx),
+        tray::Action::OpenLibrary => library_view::open(cx),
         tray::Action::OpenFolder => match output::captures_dir() {
             Ok(dir) => {
                 if let Err(e) = std::fs::create_dir_all(&dir) {

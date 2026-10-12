@@ -15,7 +15,7 @@ use gpui_kit::{
 use snapwright_capture::{Frame, Rect};
 
 use crate::selection::{Arrow, Outcome, Selector};
-use crate::session;
+use crate::session::{self, SnapTarget};
 
 /// Loupe grid: cells per side (odd, so one sits under the pointer) and their size.
 const LOUPE_CELLS: i32 = 11;
@@ -30,16 +30,17 @@ pub struct Overlay {
     height: u32,
     focus: FocusHandle,
     selector: Selector,
+    targets: Vec<SnapTarget>,
     viewport: Size<Pixels>,
     pressed_at: Instant,
     shown: bool,
 }
 
 impl Overlay {
-    /// `windows` are snap targets in this frame's pixels, front to back.
+    /// `targets` are windows in this frame's pixels, front to back.
     pub fn new(
         frame: Frame,
-        windows: Vec<Rect>,
+        targets: Vec<SnapTarget>,
         pressed_at: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -61,7 +62,8 @@ impl Overlay {
             width,
             height,
             focus,
-            selector: Selector::new(width, height, windows),
+            selector: Selector::new(width, height, targets.iter().map(|t| t.rect).collect()),
+            targets,
             viewport: size(px(1.), px(1.)),
             pressed_at,
             shown: false,
@@ -127,7 +129,8 @@ impl Overlay {
             return;
         };
         let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
-        session::deliver(frame, self.pressed_at, window, cx);
+        let meta = session::describe(r, self.width, self.height, &self.targets, self.display_id);
+        session::deliver(frame, meta, self.pressed_at, window, cx);
     }
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {

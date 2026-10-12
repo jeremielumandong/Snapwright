@@ -11,6 +11,7 @@ use gpui_kit::{
 #[cfg(not(target_os = "linux"))]
 use gpui_kit::{ClipboardItem, Image, ImageFormat};
 use snapwright_capture::{Capturer, Display, Frame, Rect, WindowInfo};
+use snapwright_library::{Library, Metadata, NewCapture, Source};
 
 use crate::output;
 use crate::overlay::Overlay;
@@ -19,6 +20,19 @@ use crate::overlay::Overlay;
 /// thread, so it sits behind a mutex.
 struct CaptureService(Arc<Mutex<Capturer>>);
 impl Global for CaptureService {}
+
+/// The capture library, if it could be opened. Writes happen on background threads.
+#[derive(Clone)]
+pub struct LibraryService(pub Option<Arc<Mutex<Library>>>);
+impl Global for LibraryService {}
+
+/// A window the selection can snap to, in one frame's pixels, with what it showed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapTarget {
+    pub rect: Rect,
+    pub app: String,
+    pub title: String,
+}
 
 /// The Linux clipboard (GPUI's X11 clipboard writes text only).
 #[cfg(target_os = "linux")]
@@ -43,6 +57,14 @@ pub fn init(cx: &mut App) -> snapwright_capture::Result<()> {
     let capturer = Capturer::new()?;
     cx.set_global(CaptureService(Arc::new(Mutex::new(capturer))));
     cx.set_global(Active::default());
+    let library = match output::library_dir().and_then(|dir| Ok(Library::open(dir)?)) {
+        Ok(lib) => Some(Arc::new(Mutex::new(lib))),
+        Err(e) => {
+            tracing::error!(error = %e, "capture library unavailable; captures are not kept");
+            None
+        }
+    };
+    cx.set_global(LibraryService(library));
     #[cfg(target_os = "linux")]
     cx.set_global(Clipboard(Arc::new(output::LinuxClipboard::new())));
     warm_up(cx);
@@ -120,7 +142,7 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
 }
 
 /// Snap targets for one display: other processes' windows, in that frame's pixels.
-fn snap_targets(display: &Display, frame: &Frame, windows: &[WindowInfo]) -> Vec<Rect> {
+fn snap_targets(display: &Display, frame: &Frame, windows: &[WindowInfo]) -> Vec<SnapTarget> {
     let own = std::process::id();
     let b = display.bounds;
     // Frames can differ from the display's reported size (scaling); map proportionally.
@@ -129,16 +151,48 @@ fn snap_targets(display: &Display, frame: &Frame, windows: &[WindowInfo]) -> Vec
     windows
         .iter()
         .filter(|w| w.pid != own)
-        .filter_map(|w| w.bounds.intersect(&b))
-        .map(|r| {
-            Rect::new(
+        .filter_map(|w| Some((w, w.bounds.intersect(&b)?)))
+        .map(|(w, r)| SnapTarget {
+            rect: Rect::new(
                 ((r.x - b.x) as f32 * sx).round() as i32,
                 ((r.y - b.y) as f32 * sy).round() as i32,
                 (r.width as f32 * sx).round() as u32,
                 (r.height as f32 * sy).round() as u32,
-            )
+            ),
+            app: w.app.clone(),
+            title: w.title.clone(),
         })
         .collect()
+}
+
+/// Describes a selection for the library: a window when it is exactly a snap target, the
+/// display when it is the whole frame, otherwise a region labelled with the frontmost window
+/// under its centre.
+pub fn describe(
+    r: Rect,
+    frame_width: u32,
+    frame_height: u32,
+    targets: &[SnapTarget],
+    display_id: u64,
+) -> Metadata {
+    let centre = (r.x + (r.width / 2) as i32, r.y + (r.height / 2) as i32);
+    let (source, under) = if let Some(t) = targets.iter().find(|t| t.rect == r) {
+        (Source::Window, Some(t))
+    } else if r == Rect::new(0, 0, frame_width, frame_height) {
+        (Source::Display, None)
+    } else {
+        (
+            Source::Region,
+            targets.iter().find(|t| t.rect.contains(centre.0, centre.1)),
+        )
+    };
+    Metadata {
+        source,
+        app: under.map(|t| t.app.clone()).unwrap_or_default(),
+        window_title: under.map(|t| t.title.clone()).unwrap_or_default(),
+        url: String::new(),
+        display_id: Some(display_id),
+    }
 }
 
 fn open_overlays(
@@ -213,21 +267,29 @@ pub fn finish(current: &mut Window, cx: &mut App) {
 }
 
 /// Ends the session with a selection: closes the overlays at once, then encodes off the UI
-/// thread and puts the PNG on the clipboard and in the captures folder.
-pub fn deliver(frame: Frame, pressed_at: Instant, current: &mut Window, cx: &mut App) {
+/// thread, puts the PNG on the clipboard, and keeps it in the library and captures folder.
+pub fn deliver(
+    frame: Frame,
+    meta: Metadata,
+    pressed_at: Instant,
+    current: &mut Window,
+    cx: &mut App,
+) {
     finish(current, cx);
     #[cfg(target_os = "linux")]
     let clipboard = cx.global::<Clipboard>().0.clone();
+    let library = cx.global::<LibraryService>().0.clone();
+    let (width, height) = (frame.width, frame.height);
     let encode = cx.background_executor().spawn(async move {
         let rgba = frame.to_rgba();
         let png = output::encode_png(frame.width, frame.height, &rgba)?;
         #[cfg(target_os = "linux")]
-        clipboard.set_image(frame.width, frame.height, rgba)?;
-        anyhow::Ok(png)
+        clipboard.set_image(frame.width, frame.height, rgba.clone())?;
+        anyhow::Ok((png, rgba))
     });
     cx.spawn(async move |cx| {
-        let png = match encode.await {
-            Ok(png) => png,
+        let (png, rgba) = match encode.await {
+            Ok(done) => done,
             Err(e) => {
                 tracing::error!(error = %e, "copying the capture failed");
                 return;
@@ -244,12 +306,64 @@ pub fn deliver(frame: Frame, pressed_at: Instant, current: &mut Window, cx: &mut
             ms = pressed_at.elapsed().as_secs_f64() * 1000.0,
             "on the clipboard (from hotkey, including selection time)"
         );
-        let save = cx
-            .background_executor()
-            .spawn(async move { output::save(&png) });
-        match save.await {
+        let keep = cx.background_executor().spawn(async move {
+            if let Some(library) = library {
+                let added = library
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("library poisoned by an earlier panic"))
+                    .and_then(|mut lib| {
+                        Ok(lib.add(&NewCapture {
+                            png: &png,
+                            rgba: &rgba,
+                            width,
+                            height,
+                            meta,
+                        })?)
+                    });
+                match added {
+                    Ok(id) => tracing::info!(id, "added to the library"),
+                    Err(e) => tracing::error!(error = %e, "adding to the library failed"),
+                }
+            }
+            output::save(&png)
+        });
+        match keep.await {
             Ok(path) => tracing::info!(path = %path.display(), "saved"),
             Err(e) => tracing::error!(error = %e, "saving the capture failed"),
+        }
+        cx.update(crate::library_view::notify_changed);
+    })
+    .detach();
+}
+
+/// Puts a PNG file on the clipboard, reading (and on Linux decoding) it off the UI thread.
+pub fn copy_file_to_clipboard(path: std::path::PathBuf, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    let clipboard = cx.global::<Clipboard>().0.clone();
+    let read = cx.background_executor().spawn(async move {
+        let png = std::fs::read(&path)?;
+        #[cfg(target_os = "linux")]
+        {
+            let (width, height, rgba) = output::decode_png(&png)?;
+            clipboard.set_image(width, height, rgba)?;
+        }
+        anyhow::Ok(png)
+    });
+    cx.spawn(async move |cx| {
+        let result = read.await;
+        #[cfg(target_os = "linux")]
+        let _ = cx;
+        match result {
+            #[cfg(not(target_os = "linux"))]
+            Ok(png) => cx.update(|cx| {
+                cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+                    ImageFormat::Png,
+                    png,
+                )));
+            }),
+            #[cfg(target_os = "linux")]
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "copying the capture failed"),
         }
     })
     .detach();
@@ -287,9 +401,38 @@ mod tests {
             window(1, Rect::new(0, 0, 500, 500)),     // other display only
             window(std::process::id(), Rect::new(1920, 0, 2560, 1440)),
         ];
+        let rects: Vec<Rect> = snap_targets(&display, &frame, &windows)
+            .into_iter()
+            .map(|t| t.rect)
+            .collect();
         assert_eq!(
-            snap_targets(&display, &frame, &windows),
+            rects,
             vec![Rect::new(80, 100, 800, 600), Rect::new(0, 50, 180, 300)]
         );
+    }
+
+    #[test]
+    fn describe_names_windows_displays_and_regions() {
+        let target = |rect, app: &str| SnapTarget {
+            rect,
+            app: app.into(),
+            title: format!("{app} window"),
+        };
+        let targets = [
+            target(Rect::new(100, 100, 200, 200), "Front"),
+            target(Rect::new(0, 0, 800, 600), "Back"),
+        ];
+        let d = describe(Rect::new(100, 100, 200, 200), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Window, "Front"));
+        assert_eq!(d.window_title, "Front window");
+        assert_eq!(d.display_id, Some(3));
+        let d = describe(Rect::new(0, 0, 1000, 800), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Display, ""));
+        let d = describe(Rect::new(150, 150, 20, 20), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, "Front"));
+        let d = describe(Rect::new(500, 400, 50, 50), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, "Back"));
+        let d = describe(Rect::new(900, 700, 50, 50), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, ""));
     }
 }

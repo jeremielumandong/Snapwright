@@ -49,6 +49,7 @@ crates/
   app/      snapwright-app      GPUI binary: global hotkey, tray, per-display overlay, clipboard, save
   capture/  snapwright-capture  Capturer, Display, Frame; one backend module per OS
   cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
+  library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 ```
 
@@ -88,6 +89,10 @@ scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, x
 - The selection logic lives in `selection.rs` in frame pixels with no GPUI types; test
   interaction changes there first.
 - `tray-icon` on Linux needs a D-Bus session; without one the tray is skipped.
+- The library lives in the platform data folder (`~/.local/share/snapwright/library` on
+  Linux); tests that set `HOME` get their own. Library calls run on background threads
+  behind `session::LibraryService`'s mutex, never on the UI thread.
+- `cargo run --release -p snapwright-app -- --library` opens the library window at launch.
 - `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
   converted, so capture frames go in as they are. `image` must be the version GPUI links.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
