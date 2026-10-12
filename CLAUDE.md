@@ -27,7 +27,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 xvfb-run -a -s "-screen 0 1920x1080x24" cargo test -p snapwright-capture --test x11 -- --ignored
 cargo run --release -p snapwright-cli -- bench --runs 100
+cargo run --release -p snapwright-app -- --capture-now   # SNAPWRIGHT_LOG=debug for timings
+xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
 ```
+
+Linux builds of the app need `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+libvulkan-dev libfontconfig-dev libfreetype-dev`, and `mesa-vulkan-drivers` to open windows
+under Xvfb.
 
 Type-check other platforms from Linux (no linking):
 
@@ -40,8 +46,10 @@ CC_x86_64_pc_windows_msvc=clang cargo clippy -p snapwright-capture --target x86_
 
 ```
 crates/
+  app/      snapwright-app      GPUI binary: global hotkey, per-display overlay, clipboard, save
   capture/  snapwright-capture  Capturer, Display, Frame; one backend module per OS
   cli/      snapwright-cli      `snapwright` binary: displays, capture, bench
+scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 ```
 
 ## Rules
@@ -69,3 +77,13 @@ crates/
   connection open while they paint. Tests that paint the root window must not run in parallel.
 - Wayland: an X11 `GetImage` under XWayland sees only X clients, so Wayland sessions are
   refused until the portal backend exists.
+- GPUI: `window.remove_window()` through a window's own handle fails while that window is
+  being updated (its event handlers run inside that update). Close the current window
+  directly and the others through their handles (`session::finish`).
+- GPUI: the first window pays for GPU setup (seconds on a software renderer). The app opens a
+  hidden window at launch to take that cost before the first hotkey.
+- GPUI's X11 clipboard writes text only; images go through `arboard` on Linux.
+- `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
+  converted, so capture frames go in as they are. `image` must be the version GPUI links.
+- Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
+  full-screen overlay. `tracing` macros shadow a local named `display`.

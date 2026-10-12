@@ -1,0 +1,28 @@
+[package]
+name = "snapwright-app"
+description = "Snapwright desktop app (GPUI): hotkey, selection overlay, clipboard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "snapwright-app"
+path = "src/main.rs"
+
+[dependencies]
+snapwright-capture.workspace = true
+anyhow.workspace = true
+directories.workspace = true
+futures.workspace = true
+global-hotkey.workspace = true
+gpui-kit.workspace = true
+image.workspace = true
+png.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+arboard.workspace = true
+
+[lints]
+workspace = true

@@ -32,19 +32,28 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Linux system packages for GPUI and the X11 tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libxcb1-dev libvulkan-dev libfontconfig-dev libfreetype-dev pkg-config \
+            xvfb mesa-vulkan-drivers xdotool xclip x11-xserver-utils imagemagick
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - name: X11 capture tests (Xvfb)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y xvfb
           xvfb-run -a -s "-screen 0 1920x1080x24" \
             cargo test -p snapwright-capture --test x11 -- --ignored
       - name: Capture benchmark (Xvfb)
         if: runner.os == 'Linux'
         run: |
-          cargo build --release -p snapwright-cli
+          cargo build --release -p snapwright-cli -p snapwright-app
           xvfb-run -a -s "-screen 0 2560x1440x24" target/release/snapwright bench --runs 100
+      - name: Overlay end to end (Xvfb, software Vulkan)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
       # Hosted macOS runners have no Screen Recording permission and Windows runners only a
       # basic display adapter, so these record what happens without failing the build.
       - name: Capture smoke test (informational)

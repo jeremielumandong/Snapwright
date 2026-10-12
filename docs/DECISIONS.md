@@ -29,3 +29,15 @@ overlay without conversion. Encoders that need RGBA convert at export time.
 
 The workspace denies `unsafe_code`; `capture`'s `linux`, `macos` and `windows` modules opt
 out, and every `unsafe` block carries a `SAFETY:` comment (clippy `undocumented_unsafe_blocks`).
+
+## 2026-10-12: GPU warm-up window at launch
+
+The first GPUI window creates the GPU device and pipelines: 2.8 s with a software renderer
+under Xvfb. The app opens a hidden 1x1 window at launch so the first overlay does not pay
+for it. Later overlays then show in 66 to 112 ms on the same software renderer.
+
+## 2026-10-12: `arboard` for clipboard images on Linux
+
+GPUI's X11 clipboard writes text only. On Linux the app puts captures on the clipboard with
+`arboard` (MIT/Apache-2.0), kept alive for the app's life because on X11 the owner serves
+every paste. macOS and Windows use GPUI's clipboard, which supports PNG.
