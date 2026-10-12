@@ -4,3 +4,4 @@
 !packaging/icons/**/*.png
 .DS_Store
 /dist
+!site/img/*.png
