@@ -440,6 +440,31 @@ fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
     .detach();
 }
 
+/// Puts an image already encoded as `png` (from these RGBA pixels) on the clipboard. Call it
+/// on the UI thread; on Linux the clipboard write itself is handed to a background thread.
+pub fn copy_image(width: u32, height: u32, rgba: Vec<u8>, png: Vec<u8>, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = png;
+        let clipboard = cx.global::<Clipboard>().0.clone();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(e) = clipboard.set_image(width, height, rgba) {
+                    tracing::error!(error = %e, "copying the image failed");
+                }
+            })
+            .detach();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (width, height, rgba);
+        cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+            ImageFormat::Png,
+            png,
+        )));
+    }
+}
+
 /// Puts a PNG file on the clipboard, reading (and on Linux decoding) it off the UI thread.
 pub fn copy_file_to_clipboard(path: std::path::PathBuf, cx: &mut App) {
     #[cfg(target_os = "linux")]

@@ -1,0 +1,19 @@
+[package]
+name = "snapwright-editor"
+description = "Snapwright annotation editor: a non-destructive scene of shapes over a capture, and its renderer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tiny-skia.workspace = true
+ab_glyph.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+png.workspace = true

@@ -69,10 +69,26 @@ impl Render for Toast {
             .child(
                 div()
                     .flex()
-                    .justify_between()
+                    .items_center()
+                    .gap(px(6.))
                     .text_size(px(12.))
                     .text_color(hsla(0., 0., 1., 0.85))
-                    .child("Copied · click to open")
+                    .child(div().flex_1().child("Copied · click to open"))
+                    .child(
+                        div()
+                            .id("toast-edit")
+                            .px(px(6.))
+                            .rounded(px(4.))
+                            .bg(hsla(0., 0., 1., 0.12))
+                            .hover(|d| d.bg(hsla(0., 0., 1., 0.24)))
+                            .child("Edit")
+                            .on_click(cx.listener(move |_, _, window, cx| {
+                                cx.stop_propagation();
+                                window.remove_window();
+                                cx.set_global(Open(None));
+                                crate::editor_view::open(id, cx);
+                            })),
+                    )
                     .child(
                         div()
                             .id("toast-close")

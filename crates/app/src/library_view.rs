@@ -21,6 +21,7 @@ use gpui_kit::{
 };
 use snapwright_library::{Capture, Library, Query, Source};
 
+use crate::editor_view;
 use crate::session::{self, LibraryService};
 
 const SIDEBAR_W: f32 = 200.;
@@ -91,6 +92,28 @@ pub fn open_at(id: Option<i64>, cx: &mut App) {
         Ok((handle, _)) => cx.set_global(LibraryWindow(Some(handle))),
         Err(e) => tracing::error!(error = %e, "could not open the library window"),
     }
+}
+
+/// Opens the newest capture in the editor.
+pub fn edit_latest(cx: &mut App) {
+    let Some(library) = cx.global::<LibraryService>().0.clone() else {
+        return;
+    };
+    let find = cx.background_executor().spawn(async move {
+        let lib = library.lock().ok()?;
+        let newest = lib
+            .list(&Query {
+                limit: 1,
+                ..Query::default()
+            })
+            .ok()?;
+        newest.first().map(|c| c.id)
+    });
+    cx.spawn(async move |cx| match find.await {
+        Some(id) => cx.update(|cx| editor_view::open(id, cx)),
+        None => tracing::warn!("no capture to edit"),
+    })
+    .detach();
 }
 
 /// What the grid shows.
@@ -374,9 +397,9 @@ impl LibraryView {
         match e.keystroke.key.as_str() {
             "delete" | "backspace" => self.trash_or_restore(cx),
             "c" if mods.secondary() => self.copy_selected(cx),
-            "enter" => {
-                if let Some(item) = self.selected_item() {
-                    cx.open_with_system(&item.image);
+            "enter" | "e" if !mods.secondary() => {
+                if let Some(id) = self.selected {
+                    editor_view::open(id, cx);
                 }
             }
             key @ ("left" | "right" | "up" | "down") => {
@@ -691,8 +714,17 @@ impl LibraryView {
                 .child(caption(c)),
         )
         .child(line("Taken", when(c.created_ms)))
-        .child(line("Size", format!("{} × {} px", c.width, c.height)))
-        .child(line("File", human_bytes(c.bytes)))
+        .child(line("Size", {
+            let (w, h) = c.shown_size();
+            format!("{w} × {h} px")
+        }))
+        .child(line("File", human_bytes(c.shown_bytes())))
+        .when(c.edit.is_some(), |d| {
+            d.child(line(
+                "Edited",
+                "Annotations can still be changed".to_owned(),
+            ))
+        })
         .child(line("Source", source.to_owned()))
         .when(!c.meta.url.is_empty(), |d| {
             d.child(line("URL", c.meta.url.clone()))
@@ -712,6 +744,27 @@ impl LibraryView {
                         .label("Copy")
                         .on_click(cx.listener(|this, _, _, cx| this.copy_selected(cx))),
                 )
+                .child(
+                    Button::new("edit")
+                        .small()
+                        .label("Edit")
+                        .tooltip("Annotate, redact or crop (E)")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(id) = this.selected {
+                                editor_view::open(id, cx);
+                            }
+                        })),
+                )
+                .when(c.edit.is_some(), |d| {
+                    d.child(
+                        Button::new("revert")
+                            .small()
+                            .label("Revert to original")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.edit(cx, |lib, id| lib.revert_edit(id));
+                            })),
+                    )
+                })
                 .child(
                     Button::new("open")
                         .small()
@@ -871,6 +924,7 @@ mod tests {
             tags: Vec::new(),
             text: String::new(),
             trashed: false,
+            edit: None,
         }
     }
 

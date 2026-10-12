@@ -52,8 +52,12 @@ Gate: the team uses it daily with no capture lost in two weeks.
 - [x] Quick-access thumbnail after capture.
       Note: bottom-right preview for 6 s (longer while hovered); a click opens the capture in
       the library; a new capture closes it first so it never shows up in a grab.
-- [ ] Editor on Emulsion's engine: arrow, rectangle, ellipse, line, text, highlight, blur and
+- [x] Editor on Emulsion's engine: arrow, rectangle, ellipse, line, text, highlight, blur and
       pixelate, step counter, crop; undo and redo; non-destructive scene saved beside the image.
+      Note: `snapwright-editor` renders with tiny-skia (Emulsion's rasteriser) and Emulsion's
+      Gaussian blur; text uses bundled Geist. Opens from the preview's Edit, or E/Enter in the
+      library. The scene and rendered result live in the library row; the original never
+      changes and "Revert to original" drops the edit.
 - [x] `snapwright-library`: SQLite + FTS5, content-addressed store, metadata (app, window
       title, URL, display, time), thumbnails, grid with virtual scrolling, search, tags.
       Note: every capture lands in the library with the app and title of the window under it;
@@ -92,3 +96,6 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Library: drag a thumbnail out to other apps; multi-select; import existing images.
 - Captures folder: make the extra copy in `Pictures/Snapwright` a setting once settings exist.
 - gpui-fast: upstream a fix for the 2 px X11 window shift, then drop `session::popup_bounds`.
+- Editor: resize handles on the selected shape; zoom and pan for large captures; IME and
+  caret movement in text; more fonts and a text background option.
+- Editor: per-tool remembered colour and width; a magnifier (callout) tool and spotlight.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end overlay test under Xvfb: hotkey, overlay timing, Esc, drag-select, click,
-# keyboard adjust, repeat last region, colour copy, clipboard, preview and library.
+# keyboard adjust, repeat last region, colour copy, clipboard, preview, library and editor.
 # Usage: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh <target dir>
 # Needs xdotool, xclip, xsetroot (x11-xserver-utils), ImageMagick and a Vulkan driver.
 set -euo pipefail
@@ -80,4 +80,41 @@ xdotool mousemove 1470 900 click 1; sleep 3
 xdotool search --name "Snapwright Library" >/dev/null || fail "clicking the preview did not open the library"
 
 grep -E "overlay visible|on the clipboard" "$OUT/app.log" | sed 's/\x1b\[[0-9;]*m//g'
+# 7. The preview's Edit button opens the editor on that capture (400x200, from step 6).
+xdotool key ctrl+shift+2; sleep 1
+xdotool mousemove 100 100 mousedown 1 mousemove 300 200 mousemove 500 300; sleep 0.3
+xdotool mouseup 1; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/plain.png"
+xdotool mousemove 1527 966 click 1; sleep 3
+eval "$(xdotool search --name "Snapwright Editor" getwindowgeometry --shell)" \
+  || fail "the preview's Edit did not open the editor"
+# The 400x200 image sits centred under the toolbar at 1:1.
+IX=$((X + 250)); IY=$((Y + 192))
+at() { echo $((IX + $1)) $((IY + $2)); }
+xdotool mousemove $(at 100 100); sleep 0.3
+xdotool key r mousemove $(at 48 28) mousedown 1 mousemove $(at 100 60) mousemove $(at 158 108) mouseup 1
+sleep 0.3
+xdotool key b mousemove $(at 300 20) mousedown 1 mousemove $(at 350 100) mousemove $(at 390 180) mouseup 1
+sleep 0.3
+xdotool key t mousemove $(at 200 140) click 1; sleep 0.3; xdotool type "Note"; xdotool key Return
+xdotool key n mousemove $(at 30 170) click 1; sleep 1
+xdotool key ctrl+c; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/annotated.png"
+[ "$(identify -format '%wx%h' "$OUT/annotated.png")" = "400x200" ] || fail "annotated size"
+[ "$(pixel "$OUT/annotated.png" 48 70)" = "srgba(229,72,77,1)" ] || fail "rectangle not drawn"
+[ "$(compare -metric AE -extract 80x150+305+25 "$OUT/annotated.png" "$OUT/plain.png" null: 2>&1 || true)" != "0" ] \
+  || fail "blur did not change the region"
+[ "$(pixel "$OUT/annotated.png" 200 5)" = "$(pixel "$OUT/plain.png" 200 5)" ] || fail "untouched pixels changed"
+# Undo removes the step marker, redo brings it back.
+xdotool key ctrl+z; sleep 0.5; xdotool key ctrl+c; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/undone.png"
+[ "$(pixel "$OUT/undone.png" 30 170)" = "$(pixel "$OUT/plain.png" 30 170)" ] || fail "undo"
+xdotool key ctrl+shift+z; sleep 0.5
+# Crop, then Ctrl+S saves the edit into the library; Ctrl+C copies the cropped image.
+xdotool key c mousemove $(at 20 10) mousedown 1 mousemove $(at 200 100) mousemove $(at 320 190) mouseup 1
+xdotool key v; sleep 0.5; xdotool key ctrl+s; sleep 1.5; xdotool key ctrl+c; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/cropped.png"
+[ "$(identify -format '%wx%h' "$OUT/cropped.png")" = "300x180" ] || fail "crop size"
+grep -q "edit saved" "$OUT/app.log" || fail "edit not saved"
+
 echo "PASS"
