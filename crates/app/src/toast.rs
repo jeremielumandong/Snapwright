@@ -194,8 +194,9 @@ fn hide_from_capture(window: &Window) -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
-        if let Ok(handle) = window.window_handle()
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        // `Window` has its own `window_handle()`; this is raw-window-handle's.
+        if let Ok(handle) = HasWindowHandle::window_handle(window)
             && let RawWindowHandle::Win32(h) = handle.as_raw()
         {
             return snapwright_capture::exclude_window(h.hwnd.get());
