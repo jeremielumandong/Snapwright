@@ -24,6 +24,19 @@ mod windows;
 
 pub use frame::{Frame, Rect};
 
+/// Whether captures leave out this process's own windows by themselves. On macOS the
+/// ScreenCaptureKit filter excludes this application, so a preview or toolbar can stay on
+/// screen during a capture. Elsewhere such windows must be closed first, or on Windows kept
+/// out with [`exclude_window`].
+pub const EXCLUDES_OWN_WINDOWS: bool = cfg!(target_os = "macos");
+
+/// Keeps a window out of every screen capture, this app's and others' (Windows 10 2004 and
+/// later: `WDA_EXCLUDEFROMCAPTURE`). `hwnd` is the window's handle. Returns whether it took.
+#[cfg(target_os = "windows")]
+pub fn exclude_window(hwnd: isize) -> bool {
+    windows::exclude_window(hwnd)
+}
+
 /// The frontmost window containing `(x, y)` (physical pixels), from a front-to-back list.
 pub fn window_at(windows: &[WindowInfo], x: i32, y: i32) -> Option<&WindowInfo> {
     windows.iter().find(|w| w.bounds.contains(x, y))

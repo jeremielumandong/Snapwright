@@ -117,4 +117,14 @@ xclip -selection clipboard -t image/png -o > "$OUT/cropped.png"
 [ "$(identify -format '%wx%h' "$OUT/cropped.png")" = "300x180" ] || fail "crop size"
 grep -q "edit saved" "$OUT/app.log" || fail "edit not saved"
 
+# 8. Repeating a region the preview now covers waits for the preview to go: same pixels.
+xdotool key ctrl+shift+2; sleep 1
+xdotool mousemove 1300 760 mousedown 1 mousemove 1450 900 mousemove 1599 999; sleep 0.3
+xdotool mouseup 1; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/corner.png"
+xdotool key ctrl+alt+shift+2; sleep 1.5
+xclip -selection clipboard -t image/png -o > "$OUT/corner-again.png"
+[ "$(compare -metric AE "$OUT/corner.png" "$OUT/corner-again.png" null: 2>&1)" = "0" ] \
+  || fail "the preview got into a repeat capture"
+
 echo "PASS"

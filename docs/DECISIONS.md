@@ -108,3 +108,19 @@ capture. The rendered image is a second content-addressed file with its own thum
 what the library shows, copies and opens; the original file is never touched, and "Revert to
 original" drops the edit. Closing the editor saves; Done also copies. Old edit files are deleted
 once no capture uses them.
+
+## 2026-10-12: Our own windows stay out of captures where the OS allows
+
+The quick-access preview sits on screen for six seconds, often while the next capture starts.
+Closing it and waiting for the compositor cost 120 ms per capture, which the latency harness
+caught (repeat last region went from 5 ms to 128 ms). Now:
+
+- macOS: the ScreenCaptureKit filter excludes this application, so none of Snapwright's own
+  windows (preview, library, editor, overlay) are ever in a capture, and nothing waits.
+- Windows: the preview window is marked `WDA_EXCLUDEFROMCAPTURE` (Windows 10 2004+); when that
+  fails it falls back to closing and waiting.
+- Linux/X11 has no such switch. Repeat last region keeps the preview up unless it covers the
+  region; a new overlay still closes it and waits.
+
+Capturing Snapwright's own library or editor window on macOS is therefore not possible; if that
+turns out to matter, except those windows in the filter.

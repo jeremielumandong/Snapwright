@@ -1,6 +1,7 @@
 //! Quick-access thumbnail: after a capture, a small preview in the bottom-right corner of the
 //! main display for a few seconds. Clicking it opens the capture in the library. It stays
-//! while the pointer is over it, and a new capture closes it first so it is never captured.
+//! while the pointer is over it. Where the OS can keep it out of captures (macOS, Windows) a
+//! new capture does not wait for it; elsewhere it is closed first so it is never captured.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -22,8 +23,9 @@ const LINGER: Duration = Duration::from_secs(6);
 /// Time for the window server to take the preview off screen before a new grab.
 pub const SETTLE: Duration = Duration::from_millis(120);
 
+/// The preview on screen, and whether the OS keeps it out of captures.
 #[derive(Default)]
-struct Open(Option<AnyWindowHandle>);
+struct Open(Option<(AnyWindowHandle, bool)>);
 impl Global for Open {}
 
 struct Toast {
@@ -109,6 +111,7 @@ impl Render for Toast {
 /// Shows the preview for capture `id`, replacing any preview already showing.
 pub fn show(id: i64, thumb: PathBuf, cx: &mut App) {
     dismiss(cx);
+    let mut hidden = false;
     let Some(screen) = cx.primary_display() else {
         return;
     };
@@ -132,7 +135,8 @@ pub fn show(id: i64, thumb: PathBuf, cx: &mut App) {
         app_id: Some("snapwright".into()),
         ..Default::default()
     };
-    let window = match cx.open_window(options, |_, cx| {
+    let window = match cx.open_window(options, |window, cx| {
+        hidden = hide_from_capture(window);
         cx.new(|_| Toast {
             id,
             thumb,
@@ -146,7 +150,7 @@ pub fn show(id: i64, thumb: PathBuf, cx: &mut App) {
         }
     };
     let handle: AnyWindowHandle = window.into();
-    cx.set_global(Open(Some(handle)));
+    cx.set_global(Open(Some((handle, hidden))));
     cx.spawn(async move |cx| {
         loop {
             cx.background_executor().timer(LINGER).await;
@@ -159,7 +163,11 @@ pub fn show(id: i64, thumb: PathBuf, cx: &mut App) {
         }
         let _ = window.update(cx, |_, window, _| window.remove_window());
         cx.update(|cx| {
-            if cx.default_global::<Open>().0 == Some(handle) {
+            if cx
+                .default_global::<Open>()
+                .0
+                .is_some_and(|(h, _)| h == handle)
+            {
                 cx.set_global(Open(None));
             }
         });
@@ -167,12 +175,32 @@ pub fn show(id: i64, thumb: PathBuf, cx: &mut App) {
     .detach();
 }
 
-/// Closes the preview if one is showing. Returns whether one was.
+/// Closes the preview if one is showing. Returns whether a capture must wait [`SETTLE`] for
+/// it to leave the screen: only when one was showing and the OS does not keep it out.
 pub fn dismiss(cx: &mut App) -> bool {
-    let Some(handle) = cx.default_global::<Open>().0.take() else {
+    let Some((handle, hidden)) = cx.default_global::<Open>().0.take() else {
         return false;
     };
-    handle
+    let closed = handle
         .update(cx, |_, window, _| window.remove_window())
-        .is_ok()
+        .is_ok();
+    closed && !hidden
+}
+
+/// Asks the OS to leave `window` out of screen captures. Returns whether it will.
+fn hide_from_capture(window: &Window) -> bool {
+    if snapwright_capture::EXCLUDES_OWN_WINDOWS {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        if let Ok(handle) = window.window_handle()
+            && let RawWindowHandle::Win32(h) = handle.as_raw()
+        {
+            return snapwright_capture::exclude_window(h.hwnd.get());
+        }
+    }
+    let _ = window;
+    false
 }
