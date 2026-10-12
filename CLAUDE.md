@@ -54,6 +54,7 @@ crates/
   library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
+site/                           marketing site (static HTML, deployed by .github/workflows/pages.yml)
 ```
 
 ## Rules
