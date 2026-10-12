@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime with no exceptions: Snapwright loads no libraries at runtime and needs
+       no JIT. Screen capture is granted by the user (Screen Recording), not by an entitlement. -->
+</dict>
+</plist>

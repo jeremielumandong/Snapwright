@@ -1,0 +1,9 @@
+#!/bin/sh
+# AppImage entry point. Runs the desktop app, or the `snapwright` CLI when the AppImage is invoked
+# through a symlink named `snapwright` (ln -s Snapwright.AppImage ~/.local/bin/snapwright).
+HERE="$(dirname "$(readlink -f "$0")")"
+export PATH="$HERE/usr/bin:$PATH"
+case "$(basename "${ARGV0:-$0}")" in
+  snapwright) exec "$HERE/usr/bin/snapwright" "$@" ;;
+  *)         exec "$HERE/usr/bin/snapwright-app" "$@" ;;
+esac

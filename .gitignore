@@ -1,4 +1,6 @@
 /target
 *.png
 !assets/**/*.png
+!packaging/icons/**/*.png
 .DS_Store
+/dist

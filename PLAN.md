@@ -67,8 +67,8 @@ Gate: the team uses it daily with no capture lost in two weeks.
       Note: harness done: `scripts/latency-bench.sh` presses the real hotkeys under Xvfb and
       reports p50/p95 for overlay, overlay over a preview, and repeat-to-clipboard; CI runs it
       with loose budgets and uploads `latency.json`. It caught the preview adding 120 ms to
-      repeats (fixed: 5.7 ms p50). Signed builds wait on an Apple Developer ID and a Windows
-      code-signing certificate.
+      repeats (fixed: 5.7 ms p50). Release workflows are in (Switchyard's, see
+      `docs/RELEASING.md`); signed builds wait on the signing secrets and variables.
 
 ## Phase 2: Public beta (weeks 15 to 26)
 
