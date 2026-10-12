@@ -160,3 +160,4 @@ footer.site a:hover { color: var(--text); }
   header.site nav { gap: 14px; }
   .stats b { font-size: 26px; }
 }
+.final .lead { margin: 0 auto 28px; }
