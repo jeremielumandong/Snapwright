@@ -124,3 +124,19 @@ caught (repeat last region went from 5 ms to 128 ms). Now:
 
 Capturing Snapwright's own library or editor window on macOS is therefore not possible; if that
 turns out to matter, except those windows in the filter.
+
+## 2026-10-12: Release builds copied from Switchyard
+
+Jeremie asked for Switchyard's release build as is, so the workflows, packaging scripts, upload
+and bump scripts and the Windows icon resource (`crates/app/build.rs`) are Switchyard's with the
+names changed. Differences:
+
+- The app binary stays `snapwright-app` and the CLI `snapwright`; the AppImage runs the CLI when
+  invoked through a symlink named `snapwright`.
+- macOS needs 14.0 (ScreenCaptureKit's `SCScreenshotManager`), not 11.0, and the hardened
+  runtime takes no exceptions (Switchyard's library-validation exception was for its database
+  drivers). Info.plist carries `NSScreenCaptureUsageDescription`.
+- Switchyard's Entra client ID and updater key variables are dropped; Snapwright has neither.
+- The Windows publisher check reads only `SNAPWRIGHT_SIGN_EXPECTED_SUBJECT`.
+
+Secrets and variables are listed in `docs/RELEASING.md`.

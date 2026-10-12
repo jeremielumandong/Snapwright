@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Snapwright
+GenericName=Screenshot Tool
+Comment=Capture, annotate and find screenshots
+Exec=snapwright-app %U
+Icon=snapwright
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=screenshot;capture;screen;annotate;snip;
+StartupWMClass=snapwright
