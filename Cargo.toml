@@ -1,0 +1,51 @@
+[workspace]
+resolver = "3"
+members = ["crates/capture", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+repository = "https://github.com/jeremielumandong/snapwright"
+
+[workspace.dependencies]
+# internal
+snapwright-capture = { path = "crates/capture" }
+
+# common
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.6", features = ["derive"] }
+png = "0.18"
+
+# Linux
+x11rb = { version = "0.14", features = ["randr", "shm"] }
+libc = "0.2"
+
+# Windows
+windows = "0.62"
+
+# macOS
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFData", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGDirectDisplay", "objc2"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
+block2 = "0.6"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
