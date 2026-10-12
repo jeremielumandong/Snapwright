@@ -12,6 +12,10 @@ tracing.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb.workspace = true
 libc.workspace = true
+serde_json.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+wayland-protocols-wlr.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [
