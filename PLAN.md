@@ -26,6 +26,10 @@ Gate: hotkey to overlay under 50 ms (p95) on macOS, Windows and X11.
 - [x] P0-8 Timing logged: hotkey to overlay visible, hotkey to clipboard.
       `scripts/overlay-e2e.sh` checks the whole flow under Xvfb in CI.
 - [ ] P0-9 Measure on real macOS, Windows and X11 machines; record numbers here.
+      First data from hosted CI runners (`snapwright bench`, VMs without a GPU):
+      macOS (ScreenCaptureKit, 1024x768): first 273 ms, p50 15.5 ms, p95 26.9 ms.
+      Windows (DXGI, 1024x768): first 10.7 ms, p50 0.57 ms (unchanged screen reuses the
+      last frame). X11 (Xvfb, 2560x1440): first 26 ms, p50 2.5 ms, p95 2.7 ms.
 - [ ] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
 - [ ] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
       with pixel colour; window snapping preview.
@@ -62,6 +66,9 @@ Gate: 1,000 beta users and 99.5% crash-free sessions.
 Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 
 ## Follow-ups
+
+- macOS: `SCScreenshotManager` costs ~15 ms a shot and ~270 ms cold. Try keeping an
+  `SCStream` paused between captures, or starting one when the hotkey's modifiers go down.
 
 - Windows: honour `DXGI_OUTPUT_DESC::Rotation` for portrait monitors.
 - Windows: HDR desktops through `DuplicateOutput1` with an FP16 format, tone mapped to sRGB.
