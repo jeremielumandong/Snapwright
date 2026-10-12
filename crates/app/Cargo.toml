@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 snapwright-capture.workspace = true
 snapwright-library.workspace = true
+snapwright-editor.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 directories.workspace = true
