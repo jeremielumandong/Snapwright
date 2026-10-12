@@ -1,0 +1,70 @@
+[workspace]
+resolver = "3"
+members = ["crates/app", "crates/capture", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+repository = "https://github.com/jeremielumandong/snapwright"
+
+[workspace.dependencies]
+# internal
+snapwright-capture = { path = "crates/capture" }
+
+# common
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.6", features = ["derive"] }
+png = "0.18"
+futures = "0.3"
+directories = "6"
+
+# UI: gpui-kit is the facade over gpui (gpui-pre =0.3.8) + gpui-component 0.7.1, kept in
+# lockstep, as in Switchyard. `image` must match the version gpui links (its `Frame` type).
+gpui-kit = "=0.7.1"
+image = { version = "0.25", default-features = false }
+global-hotkey = "0.8"
+# Linux clipboard images: GPUI's X11 clipboard writes text only.
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+
+# Linux
+x11rb = { version = "0.14", features = ["randr", "shm"] }
+libc = "0.2"
+
+# Windows
+windows = "0.62"
+
+# macOS
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFData", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGDirectDisplay", "objc2"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
+block2 = "0.6"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# gpui-fast (Retained Mode rendering) in place of GPUI Kit's upstream `gpui-pre`, pinned to
+# the same revision Switchyard ships. See docs/DECISIONS.md.
+[patch.crates-io]
+gpui-pre = { git = "https://github.com/longbridge/gpui-fast", rev = "598306fcbf77bff0f764b5a178a447344e72e132" }
+gpui-pre-platform = { git = "https://github.com/longbridge/gpui-fast", rev = "598306fcbf77bff0f764b5a178a447344e72e132" }
+gpui-pre-macros = { git = "https://github.com/longbridge/gpui-fast", rev = "598306fcbf77bff0f764b5a178a447344e72e132" }
+gpui-pre-sum-tree = { git = "https://github.com/longbridge/gpui-fast", rev = "598306fcbf77bff0f764b5a178a447344e72e132" }
+gpui-pre-web = { git = "https://github.com/longbridge/gpui-fast", rev = "598306fcbf77bff0f764b5a178a447344e72e132" }
