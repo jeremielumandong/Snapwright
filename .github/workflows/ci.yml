@@ -62,4 +62,5 @@ jobs:
         run: |
           cargo build --release -p snapwright-cli
           target/release/snapwright displays
+          target/release/snapwright windows
           target/release/snapwright bench --runs 20

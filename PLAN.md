@@ -30,11 +30,16 @@ Gate: hotkey to overlay under 50 ms (p95) on macOS, Windows and X11.
       macOS (ScreenCaptureKit, 1024x768): first 273 ms, p50 15.5 ms, p95 26.9 ms.
       Windows (DXGI, 1024x768): first 10.7 ms, p50 0.57 ms (unchanged screen reuses the
       last frame). X11 (Xvfb, 2560x1440): first 26 ms, p50 2.5 ms, p95 2.7 ms.
-- [ ] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
-- [ ] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
+- [x] P0-10 Tray icon (`tray-icon`) with Capture, Open captures folder, Quit.
+      Note: Linux uses StatusNotifierItem (`ksni`), no GTK.
+- [x] P0-11 Overlay polish: arrow keys nudge and Shift+arrows resize the selection; loupe
       with pixel colour; window snapping preview.
+      Note: hover highlights the window under the pointer, a click takes it; Shift on release
+      keeps a drag open for adjusting; `C` copies the colour under the pointer as hex.
+      `Capturer::windows()` and `snapwright windows` list windows on all three OSes.
 - [ ] P0-12 Pre-create one hidden overlay window per display and reuse it, if real-hardware
-      numbers show window creation dominates.
+      numbers show window creation dominates. Waiting on P0-9: GPUI has no per-window
+      hide/show, so this needs a gpui-fast patch (see DECISIONS).
 
 ## Phase 1: Alpha (weeks 5 to 14)
 
@@ -73,3 +78,6 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Windows: honour `DXGI_OUTPUT_DESC::Rotation` for portrait monitors.
 - Windows: HDR desktops through `DuplicateOutput1` with an FP16 format, tone mapped to sRGB.
 - macOS: display names from `NSScreen.localizedName`.
+- macOS: confirm `SCShareableContent.windows` comes front to back on a real machine; if not,
+  order by `CGWindowListCopyWindowInfo`.
+- gpui-fast: upstream a fix for the 2 px X11 window shift, then drop `X11_SHIFT`.

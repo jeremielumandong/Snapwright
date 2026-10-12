@@ -22,7 +22,7 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::core::Interface;
 
-use crate::{CaptureError, Display, Frame, Rect, Result};
+use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
 
 fn err(api: &'static str, e: windows::core::Error) -> CaptureError {
     if e.code() == windows::Win32::Foundation::E_ACCESSDENIED {
@@ -67,6 +67,10 @@ impl Backend {
 
     pub(crate) fn displays(&mut self) -> Result<Vec<Display>> {
         Ok(self.outputs.iter().map(Output::display).collect())
+    }
+
+    pub(crate) fn windows(&mut self) -> Result<Vec<WindowInfo>> {
+        list_windows()
     }
 
     pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
@@ -301,4 +305,132 @@ impl Output {
         unsafe { self.context.Unmap(staging, 0) };
         Ok(frame)
     }
+}
+
+/// Visible top-level windows, front to back (`EnumWindows` walks the z-order from the top).
+fn list_windows() -> Result<Vec<WindowInfo>> {
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
+    use windows::Win32::Graphics::Dwm::{
+        DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GWL_EXSTYLE, GetWindowLongW, GetWindowTextW, GetWindowThreadProcessId,
+        IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
+    };
+    use windows::core::{BOOL, PWSTR};
+
+    unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        // SAFETY: `lparam` is the `&mut Vec<HWND>` passed to `EnumWindows` below, which outlives
+        // the enumeration and is not otherwise borrowed during it.
+        let found = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
+        found.push(hwnd);
+        BOOL(1)
+    }
+
+    let mut handles: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only pushes into the vector behind `lparam`.
+    unsafe {
+        EnumWindows(
+            Some(collect),
+            LPARAM(&mut handles as *mut Vec<HWND> as isize),
+        )
+    }
+    .map_err(|e| err("EnumWindows", e))?;
+
+    let mut names: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for hwnd in handles {
+        // SAFETY: plain queries on a window handle from `EnumWindows`; a window that closed
+        // since then makes them fail or return zero, which skips it.
+        let visible = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() };
+        if !visible {
+            continue;
+        }
+        // SAFETY: as above.
+        let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+        if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
+            continue;
+        }
+        let mut cloaked = 0u32;
+        // SAFETY: the out-pointer is a local of the size passed.
+        let _ = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                (&mut cloaked as *mut u32).cast(),
+                size_of::<u32>() as u32,
+            )
+        };
+        if cloaked != 0 {
+            continue;
+        }
+        let mut r = RECT::default();
+        // SAFETY: the out-pointer is a local RECT of the size passed. The extended frame bounds
+        // exclude the invisible resize borders that `GetWindowRect` includes.
+        if unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                (&mut r as *mut RECT).cast(),
+                size_of::<RECT>() as u32,
+            )
+        }
+        .is_err()
+        {
+            continue;
+        }
+        let (w, h) = (r.right - r.left, r.bottom - r.top);
+        if w < 2 || h < 2 {
+            continue;
+        }
+        let mut title = [0u16; 256];
+        // SAFETY: the buffer is a local array; the call writes at most its length.
+        let len = unsafe { GetWindowTextW(hwnd, &mut title) }.max(0) as usize;
+        let mut pid = 0u32;
+        // SAFETY: the out-pointer is a local.
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        let app = names
+            .entry(pid)
+            .or_insert_with(|| {
+                // SAFETY: the process handle is checked, used once and closed; the name buffer
+                // is a local array whose length is passed in and updated by the call.
+                unsafe {
+                    let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+                    else {
+                        return String::new();
+                    };
+                    let mut buf = [0u16; 512];
+                    let mut n = buf.len() as u32;
+                    let ok = QueryFullProcessImageNameW(
+                        process,
+                        PROCESS_NAME_WIN32,
+                        PWSTR(buf.as_mut_ptr()),
+                        &mut n,
+                    )
+                    .is_ok();
+                    let _ = CloseHandle(process);
+                    if !ok {
+                        return String::new();
+                    }
+                    let path = String::from_utf16_lossy(&buf[..n as usize]);
+                    std::path::Path::new(&path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                }
+            })
+            .clone();
+        out.push(WindowInfo {
+            id: hwnd.0 as usize as u64,
+            pid,
+            app,
+            title: String::from_utf16_lossy(&title[..len]),
+            bounds: Rect::new(r.left, r.top, w as u32, h as u32),
+        });
+    }
+    Ok(out)
 }

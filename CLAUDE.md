@@ -46,9 +46,9 @@ CC_x86_64_pc_windows_msvc=clang cargo clippy -p snapwright-capture --target x86_
 
 ```
 crates/
-  app/      snapwright-app      GPUI binary: global hotkey, per-display overlay, clipboard, save
+  app/      snapwright-app      GPUI binary: global hotkey, tray, per-display overlay, clipboard, save
   capture/  snapwright-capture  Capturer, Display, Frame; one backend module per OS
-  cli/      snapwright-cli      `snapwright` binary: displays, capture, bench
+  cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 ```
 
@@ -83,6 +83,11 @@ scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, x
 - GPUI: the first window pays for GPU setup (seconds on a software renderer). The app opens a
   hidden window at launch to take that cost before the first hotkey.
 - GPUI's X11 clipboard writes text only; images go through `arboard` on Linux.
+- GPUI's X11 backend creates windows 2 px right of the requested origin; override-redirect
+  overlays ask for 2 px less (`session::X11_SHIFT`).
+- The selection logic lives in `selection.rs` in frame pixels with no GPUI types; test
+  interaction changes there first.
+- `tray-icon` on Linux needs a D-Bus session; without one the tray is skipped.
 - `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
   converted, so capture frames go in as they are. `image` must be the version GPUI links.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
