@@ -10,7 +10,8 @@ use gpui_kit::{
 };
 #[cfg(not(target_os = "linux"))]
 use gpui_kit::{ClipboardItem, Image, ImageFormat};
-use snapwright_capture::{Capturer, Display, Frame};
+use snapwright_capture::{Capturer, Display, Frame, Rect, WindowInfo};
+use snapwright_library::{Library, Metadata, NewCapture, Source};
 
 use crate::output;
 use crate::overlay::Overlay;
@@ -20,11 +21,32 @@ use crate::overlay::Overlay;
 struct CaptureService(Arc<Mutex<Capturer>>);
 impl Global for CaptureService {}
 
+/// The capture library, if it could be opened. Writes happen on background threads.
+#[derive(Clone)]
+pub struct LibraryService(pub Option<Arc<Mutex<Library>>>);
+impl Global for LibraryService {}
+
+/// A window the selection can snap to, in one frame's pixels, with what it showed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapTarget {
+    pub rect: Rect,
+    pub app: String,
+    pub title: String,
+}
+
 /// The Linux clipboard (GPUI's X11 clipboard writes text only).
 #[cfg(target_os = "linux")]
 struct Clipboard(Arc<output::LinuxClipboard>);
 #[cfg(target_os = "linux")]
 impl Global for Clipboard {}
+
+/// The last region delivered, for "repeat last region".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LastRegion {
+    display_id: u64,
+    rect: Rect,
+}
+impl Global for LastRegion {}
 
 /// Overlay windows of the session in progress, if any.
 #[derive(Default)]
@@ -34,11 +56,35 @@ struct Active {
 }
 impl Global for Active {}
 
+/// GPUI's X11 backend creates every window 2 px right of where it was asked (a Zed
+/// workaround for GNOME). Override-redirect pop-ups keep that shift, which would offset the
+/// frozen frame from the real screen.
+#[cfg(target_os = "linux")]
+const X11_SHIFT: f32 = 2.0;
+
+/// Bounds to request for a pop-up window so it lands exactly at `bounds`.
+pub fn popup_bounds(bounds: Bounds<gpui_kit::Pixels>) -> Bounds<gpui_kit::Pixels> {
+    #[cfg(target_os = "linux")]
+    let bounds = Bounds::new(
+        point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
+        bounds.size,
+    );
+    bounds
+}
+
 /// Connects to the platform capture API once, at startup.
 pub fn init(cx: &mut App) -> snapwright_capture::Result<()> {
     let capturer = Capturer::new()?;
     cx.set_global(CaptureService(Arc::new(Mutex::new(capturer))));
     cx.set_global(Active::default());
+    let library = match output::library_dir().and_then(|dir| Ok(Library::open(dir)?)) {
+        Ok(lib) => Some(Arc::new(Mutex::new(lib))),
+        Err(e) => {
+            tracing::error!(error = %e, "capture library unavailable; captures are not kept");
+            None
+        }
+    };
+    cx.set_global(LibraryService(library));
     #[cfg(target_os = "linux")]
     cx.set_global(Clipboard(Arc::new(output::LinuxClipboard::new())));
     warm_up(cx);
@@ -76,30 +122,43 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
         return;
     }
     active.capturing = true;
+    // A quick-access preview still on screen would end up in the capture.
+    let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
     let capturer = cx.global::<CaptureService>().0.clone();
+    let timer = settle.map(|d| cx.background_executor().timer(d));
     let grab = cx.background_executor().spawn(async move {
+        if let Some(timer) = timer {
+            timer.await;
+        }
         let mut capturer = capturer
             .lock()
             .map_err(|_| anyhow::anyhow!("capture backend poisoned by an earlier panic"))?;
         let displays = capturer.displays()?;
-        displays
+        let shots = displays
             .into_iter()
             .map(|d| capturer.capture_display(&d).map(|f| (d, f)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(anyhow::Error::from)
+            .collect::<Result<Vec<_>, _>>()?;
+        // Listed before any overlay opens, so none of ours are in it. Snapping is a nicety:
+        // a failure here still shows the overlay.
+        let windows = capturer.windows().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "window list unavailable; snapping off");
+            Vec::new()
+        });
+        anyhow::Ok((shots, windows))
     });
     cx.spawn(async move |cx| {
         let shots = grab.await;
         cx.update(|cx| {
             cx.global_mut::<Active>().capturing = false;
             match shots {
-                Ok(shots) => {
+                Ok((shots, windows)) => {
                     tracing::debug!(
                         ms = pressed_at.elapsed().as_secs_f64() * 1000.0,
                         displays = shots.len(),
+                        windows = windows.len(),
                         "captured"
                     );
-                    open_overlays(shots, pressed_at, cx);
+                    open_overlays(shots, &windows, pressed_at, cx);
                 }
                 Err(e) => tracing::error!(error = %e, "capture failed"),
             }
@@ -108,7 +167,66 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
     .detach();
 }
 
-fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App) {
+/// Snap targets for one display: other processes' windows, in that frame's pixels.
+fn snap_targets(display: &Display, frame: &Frame, windows: &[WindowInfo]) -> Vec<SnapTarget> {
+    let own = std::process::id();
+    let b = display.bounds;
+    // Frames can differ from the display's reported size (scaling); map proportionally.
+    let sx = frame.width as f32 / b.width.max(1) as f32;
+    let sy = frame.height as f32 / b.height.max(1) as f32;
+    windows
+        .iter()
+        .filter(|w| w.pid != own)
+        .filter_map(|w| Some((w, w.bounds.intersect(&b)?)))
+        .map(|(w, r)| SnapTarget {
+            rect: Rect::new(
+                ((r.x - b.x) as f32 * sx).round() as i32,
+                ((r.y - b.y) as f32 * sy).round() as i32,
+                (r.width as f32 * sx).round() as u32,
+                (r.height as f32 * sy).round() as u32,
+            ),
+            app: w.app.clone(),
+            title: w.title.clone(),
+        })
+        .collect()
+}
+
+/// Describes a selection for the library: a window when it is exactly a snap target, the
+/// display when it is the whole frame, otherwise a region labelled with the frontmost window
+/// under its centre.
+pub fn describe(
+    r: Rect,
+    frame_width: u32,
+    frame_height: u32,
+    targets: &[SnapTarget],
+    display_id: u64,
+) -> Metadata {
+    let centre = (r.x + (r.width / 2) as i32, r.y + (r.height / 2) as i32);
+    let (source, under) = if let Some(t) = targets.iter().find(|t| t.rect == r) {
+        (Source::Window, Some(t))
+    } else if r == Rect::new(0, 0, frame_width, frame_height) {
+        (Source::Display, None)
+    } else {
+        (
+            Source::Region,
+            targets.iter().find(|t| t.rect.contains(centre.0, centre.1)),
+        )
+    };
+    Metadata {
+        source,
+        app: under.map(|t| t.app.clone()).unwrap_or_default(),
+        window_title: under.map(|t| t.title.clone()).unwrap_or_default(),
+        url: String::new(),
+        display_id: Some(display_id),
+    }
+}
+
+fn open_overlays(
+    shots: Vec<(Display, Frame)>,
+    on_screen: &[WindowInfo],
+    pressed_at: Instant,
+    cx: &mut App,
+) {
     let screens = cx.displays();
     let mut windows = Vec::with_capacity(shots.len());
     for (display, frame) in shots {
@@ -123,10 +241,10 @@ fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App
             let o = d.bounds().origin;
             (o.x - wanted.origin.x).abs() < px(2.) && (o.y - wanted.origin.y).abs() < px(2.)
         });
+        let bounds = screen.map(|d| d.bounds()).unwrap_or(wanted);
+        let bounds = popup_bounds(bounds);
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(
-                screen.map(|d| d.bounds()).unwrap_or(wanted),
-            )),
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
             display_id: screen.map(|d| d.id()),
             titlebar: None,
             focus: true,
@@ -139,8 +257,9 @@ fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App
             app_id: Some("snapwright".into()),
             ..Default::default()
         };
+        let targets = snap_targets(&display, &frame, on_screen);
         match cx.open_window(options, |window, cx| {
-            cx.new(|cx| Overlay::new(frame, pressed_at, window, cx))
+            cx.new(|cx| Overlay::new(frame, targets, pressed_at, window, cx))
         }) {
             Ok(handle) => windows.push(handle.into()),
             Err(e) => {
@@ -150,6 +269,68 @@ fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App
         }
     }
     cx.global_mut::<Active>().windows = windows;
+}
+
+/// Captures the last delivered region again, without the overlay: same display, same
+/// pixels. Falls back to a normal session when nothing was captured yet or that display is
+/// gone.
+pub fn repeat_last(pressed_at: Instant, cx: &mut App) {
+    let Some(last) = cx.try_global::<LastRegion>().copied() else {
+        start(pressed_at, cx);
+        return;
+    };
+    let active = cx.global_mut::<Active>();
+    if active.capturing || !active.windows.is_empty() {
+        return;
+    }
+    active.capturing = true;
+    let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
+    let capturer = cx.global::<CaptureService>().0.clone();
+    let timer = settle.map(|d| cx.background_executor().timer(d));
+    let grab = cx.background_executor().spawn(async move {
+        if let Some(timer) = timer {
+            timer.await;
+        }
+        let mut capturer = capturer
+            .lock()
+            .map_err(|_| anyhow::anyhow!("capture backend poisoned by an earlier panic"))?;
+        let Some(display) = capturer
+            .displays()?
+            .into_iter()
+            .find(|d| d.id == last.display_id)
+        else {
+            return Ok(None);
+        };
+        let frame = capturer.capture_display(&display)?;
+        let windows = capturer.windows().unwrap_or_default();
+        let targets = snap_targets(&display, &frame, &windows);
+        let Some(region) = last
+            .rect
+            .intersect(&Rect::new(0, 0, frame.width, frame.height))
+        else {
+            return Ok(None);
+        };
+        let meta = describe(region, frame.width, frame.height, &targets, display.id);
+        let crop = frame
+            .crop(region)
+            .ok_or_else(|| anyhow::anyhow!("region outside the display"))?;
+        anyhow::Ok(Some((crop, meta)))
+    });
+    cx.spawn(async move |cx| {
+        let shot = grab.await;
+        cx.update(|cx| {
+            cx.global_mut::<Active>().capturing = false;
+            match shot {
+                Ok(Some((frame, meta))) => keep(frame, meta, pressed_at, cx),
+                Ok(None) => {
+                    tracing::info!("last region's display is gone; selecting a new one");
+                    start(pressed_at, cx);
+                }
+                Err(e) => tracing::error!(error = %e, "repeat capture failed"),
+            }
+        });
+    })
+    .detach();
 }
 
 /// Closes every overlay of the session. `current` is the overlay whose event handler is
@@ -166,22 +347,41 @@ pub fn finish(current: &mut Window, cx: &mut App) {
     }
 }
 
-/// Ends the session with a selection: closes the overlays at once, then encodes off the UI
-/// thread and puts the PNG on the clipboard and in the captures folder.
-pub fn deliver(frame: Frame, pressed_at: Instant, current: &mut Window, cx: &mut App) {
+/// Ends the session with a selection: closes the overlays at once, remembers the region for
+/// "repeat last region", then hands the pixels to [`keep`].
+pub fn deliver(
+    frame: Frame,
+    region: Rect,
+    meta: Metadata,
+    pressed_at: Instant,
+    current: &mut Window,
+    cx: &mut App,
+) {
     finish(current, cx);
+    cx.set_global(LastRegion {
+        display_id: frame.display_id,
+        rect: region,
+    });
+    keep(frame, meta, pressed_at, cx);
+}
+
+/// Encodes a finished capture off the UI thread, puts the PNG on the clipboard, and keeps it
+/// in the library and the captures folder.
+fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
     #[cfg(target_os = "linux")]
     let clipboard = cx.global::<Clipboard>().0.clone();
+    let library = cx.global::<LibraryService>().0.clone();
+    let (width, height) = (frame.width, frame.height);
     let encode = cx.background_executor().spawn(async move {
         let rgba = frame.to_rgba();
         let png = output::encode_png(frame.width, frame.height, &rgba)?;
         #[cfg(target_os = "linux")]
-        clipboard.set_image(frame.width, frame.height, rgba)?;
-        anyhow::Ok(png)
+        clipboard.set_image(frame.width, frame.height, rgba.clone())?;
+        anyhow::Ok((png, rgba))
     });
     cx.spawn(async move |cx| {
-        let png = match encode.await {
-            Ok(png) => png,
+        let (png, rgba) = match encode.await {
+            Ok(done) => done,
             Err(e) => {
                 tracing::error!(error = %e, "copying the capture failed");
                 return;
@@ -198,13 +398,145 @@ pub fn deliver(frame: Frame, pressed_at: Instant, current: &mut Window, cx: &mut
             ms = pressed_at.elapsed().as_secs_f64() * 1000.0,
             "on the clipboard (from hotkey, including selection time)"
         );
-        let save = cx
-            .background_executor()
-            .spawn(async move { output::save(&png) });
-        match save.await {
-            Ok(path) => tracing::info!(path = %path.display(), "saved"),
-            Err(e) => tracing::error!(error = %e, "saving the capture failed"),
+        let keep = cx.background_executor().spawn(async move {
+            let mut stored = None;
+            if let Some(library) = library {
+                let added = library
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("library poisoned by an earlier panic"))
+                    .and_then(|mut lib| {
+                        let id = lib.add(&NewCapture {
+                            png: &png,
+                            rgba: &rgba,
+                            width,
+                            height,
+                            meta,
+                        })?;
+                        let thumb = lib.thumb_path_of(&lib.get(id)?);
+                        Ok((id, thumb))
+                    });
+                match added {
+                    Ok((id, thumb)) => {
+                        tracing::info!(id, "added to the library");
+                        stored = Some((id, thumb));
+                    }
+                    Err(e) => tracing::error!(error = %e, "adding to the library failed"),
+                }
+            }
+            match output::save(&png) {
+                Ok(path) => tracing::info!(path = %path.display(), "saved"),
+                Err(e) => tracing::error!(error = %e, "saving the capture failed"),
+            }
+            stored
+        });
+        let stored = keep.await;
+        cx.update(|cx| {
+            crate::library_view::notify_changed(cx);
+            if let Some((id, thumb)) = stored {
+                crate::toast::show(id, thumb, cx);
+            }
+        });
+    })
+    .detach();
+}
+
+/// Puts a PNG file on the clipboard, reading (and on Linux decoding) it off the UI thread.
+pub fn copy_file_to_clipboard(path: std::path::PathBuf, cx: &mut App) {
+    #[cfg(target_os = "linux")]
+    let clipboard = cx.global::<Clipboard>().0.clone();
+    let read = cx.background_executor().spawn(async move {
+        let png = std::fs::read(&path)?;
+        #[cfg(target_os = "linux")]
+        {
+            let (width, height, rgba) = output::decode_png(&png)?;
+            clipboard.set_image(width, height, rgba)?;
+        }
+        anyhow::Ok(png)
+    });
+    cx.spawn(async move |cx| {
+        let result = read.await;
+        #[cfg(target_os = "linux")]
+        let _ = cx;
+        match result {
+            #[cfg(not(target_os = "linux"))]
+            Ok(png) => cx.update(|cx| {
+                cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+                    ImageFormat::Png,
+                    png,
+                )));
+            }),
+            #[cfg(target_os = "linux")]
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "copying the capture failed"),
         }
     })
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snap_targets_are_display_local_clipped_and_skip_our_windows() {
+        let display = Display {
+            id: 1,
+            name: "right".into(),
+            bounds: Rect::new(1920, 0, 2560, 1440),
+            scale: 1.0,
+            primary: false,
+        };
+        let frame = Frame {
+            display_id: 1,
+            width: 2560,
+            height: 1440,
+            data: Vec::new(),
+        };
+        let window = |pid, bounds| WindowInfo {
+            id: 0,
+            pid,
+            app: String::new(),
+            title: String::new(),
+            bounds,
+        };
+        let windows = [
+            window(1, Rect::new(2000, 100, 800, 600)),
+            window(1, Rect::new(1800, 50, 300, 300)), // straddles both displays
+            window(1, Rect::new(0, 0, 500, 500)),     // other display only
+            window(std::process::id(), Rect::new(1920, 0, 2560, 1440)),
+        ];
+        let rects: Vec<Rect> = snap_targets(&display, &frame, &windows)
+            .into_iter()
+            .map(|t| t.rect)
+            .collect();
+        assert_eq!(
+            rects,
+            vec![Rect::new(80, 100, 800, 600), Rect::new(0, 50, 180, 300)]
+        );
+    }
+
+    #[test]
+    fn describe_names_windows_displays_and_regions() {
+        let target = |rect, app: &str| SnapTarget {
+            rect,
+            app: app.into(),
+            title: format!("{app} window"),
+        };
+        let targets = [
+            target(Rect::new(100, 100, 200, 200), "Front"),
+            target(Rect::new(0, 0, 800, 600), "Back"),
+        ];
+        let d = describe(Rect::new(100, 100, 200, 200), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Window, "Front"));
+        assert_eq!(d.window_title, "Front window");
+        assert_eq!(d.display_id, Some(3));
+        let d = describe(Rect::new(0, 0, 1000, 800), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Display, ""));
+        let d = describe(Rect::new(150, 150, 20, 20), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, "Front"));
+        let d = describe(Rect::new(500, 400, 50, 50), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, "Back"));
+        let d = describe(Rect::new(900, 700, 50, 50), 1000, 800, &targets, 3);
+        assert_eq!((d.source, d.app.as_str()), (Source::Region, ""));
+    }
 }

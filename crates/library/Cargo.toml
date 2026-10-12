@@ -1,0 +1,20 @@
+[package]
+name = "snapwright-library"
+description = "Snapwright capture library: content-addressed image store, SQLite metadata and full-text search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+png.workspace = true
+image.workspace = true
+rusqlite.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

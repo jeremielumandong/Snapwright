@@ -1,41 +1,46 @@
 //! The selection overlay: one borderless window per display showing that display's frozen
-//! frame. Drag to select; Enter or releasing the mouse copies, Esc cancels. A click without a
-//! drag takes the whole display.
+//! frame. Hover highlights a window, a click takes it, a drag selects a region; see
+//! [`crate::selection`] for the whole interaction. A loupe beside the pointer shows the pixels
+//! under it and their colour; `C` copies that colour as hex. Esc cancels.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use gpui_kit::{
-    Bounds, Context, CursorStyle, FocusHandle, Hsla, ImageSource, InteractiveElement as _,
-    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, Render, RenderImage, SharedString, Size, Styled as _,
-    Window, div, hsla, img, point, px, size,
+    ClipboardItem, Context, CursorStyle, Div, FocusHandle, Hsla, ImageSource,
+    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, RenderImage, Rgba,
+    SharedString, Size, Styled as _, Window, div, hsla, img, px, size,
 };
 use snapwright_capture::{Frame, Rect};
 
-use crate::session;
+use crate::selection::{Arrow, Outcome, Selector};
+use crate::session::{self, SnapTarget};
 
-/// Selections smaller than this (logical pixels) count as a click.
-const MIN_DRAG: f32 = 4.0;
+/// Loupe grid: cells per side (odd, so one sits under the pointer) and their size.
+const LOUPE_CELLS: i32 = 11;
+const LOUPE_CELL: f32 = 9.0;
 
 pub struct Overlay {
     display_id: u64,
     /// The frozen frame. Its pixels live in the image (GPUI takes BGRA, so no conversion and
-    /// no copy); crops read them back from there.
+    /// no copy); crops and the loupe read them back from there.
     image: Arc<RenderImage>,
     width: u32,
     height: u32,
     focus: FocusHandle,
-    drag_from: Option<Point<Pixels>>,
-    selection: Option<Bounds<Pixels>>,
+    selector: Selector,
+    targets: Vec<SnapTarget>,
     viewport: Size<Pixels>,
     pressed_at: Instant,
     shown: bool,
 }
 
 impl Overlay {
+    /// `targets` are windows in this frame's pixels, front to back.
     pub fn new(
         frame: Frame,
+        targets: Vec<SnapTarget>,
         pressed_at: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -57,35 +62,60 @@ impl Overlay {
             width,
             height,
             focus,
-            drag_from: None,
-            selection: None,
+            selector: Selector::new(width, height, targets.iter().map(|t| t.rect).collect()),
+            targets,
             viewport: size(px(1.), px(1.)),
             pressed_at,
             shown: false,
         }
     }
 
-    /// The selection in frame pixels, or the whole display when nothing is selected.
-    fn selected_rect(&self) -> Rect {
-        let Some(sel) = self.selection else {
-            return Rect::new(0, 0, self.width, self.height);
-        };
-        let sx = self.width as f32 / f32::from(self.viewport.width).max(1.0);
-        let sy = self.height as f32 / f32::from(self.viewport.height).max(1.0);
-        let x0 = (f32::from(sel.origin.x) * sx).round();
-        let y0 = (f32::from(sel.origin.y) * sy).round();
-        let x1 = (f32::from(sel.origin.x + sel.size.width) * sx).round();
-        let y1 = (f32::from(sel.origin.y + sel.size.height) * sy).round();
-        Rect::new(
-            x0 as i32,
-            y0 as i32,
-            (x1 - x0).max(1.0) as u32,
-            (y1 - y0).max(1.0) as u32,
+    /// Frame pixels per logical pixel, per axis.
+    fn scale(&self) -> (f32, f32) {
+        (
+            self.width as f32 / f32::from(self.viewport.width).max(1.0),
+            self.height as f32 / f32::from(self.viewport.height).max(1.0),
         )
     }
 
-    fn deliver(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let r = self.selected_rect();
+    fn to_frame(&self, p: Point<Pixels>) -> (i32, i32) {
+        let (sx, sy) = self.scale();
+        (
+            (f32::from(p.x) * sx).floor() as i32,
+            (f32::from(p.y) * sy).floor() as i32,
+        )
+    }
+
+    /// A frame rectangle in logical pixels: (x, y, width, height).
+    fn to_logical(&self, r: Rect) -> (Pixels, Pixels, Pixels, Pixels) {
+        let (sx, sy) = self.scale();
+        (
+            px(r.x as f32 / sx),
+            px(r.y as f32 / sy),
+            px(r.width as f32 / sx),
+            px(r.height as f32 / sy),
+        )
+    }
+
+    /// The BGRA pixel at frame coordinates, if inside the frame.
+    fn pixel(&self, x: i32, y: i32) -> Option<[u8; 4]> {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return None;
+        }
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        let bytes = self.image.as_bytes(0)?;
+        bytes.get(i..i + 4)?.try_into().ok()
+    }
+
+    fn apply(&mut self, outcome: Outcome, window: &mut Window, cx: &mut Context<Self>) {
+        match outcome {
+            Outcome::Unchanged => {}
+            Outcome::Changed => cx.notify(),
+            Outcome::Deliver(r) => self.deliver(r, window, cx),
+        }
+    }
+
+    fn deliver(&mut self, r: Rect, window: &mut Window, cx: &mut Context<Self>) {
         let Some(bytes) = self.image.as_bytes(0) else {
             return;
         };
@@ -99,44 +129,130 @@ impl Overlay {
             return;
         };
         let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
-        session::deliver(frame, self.pressed_at, window, cx);
+        let meta = session::describe(r, self.width, self.height, &self.targets, self.display_id);
+        session::deliver(frame, r, meta, self.pressed_at, window, cx);
     }
 
-    fn on_mouse_down(&mut self, e: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.drag_from = Some(e.position);
-        self.selection = None;
-        cx.notify();
+    fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self.selector.pointer_down(self.to_frame(e.position));
+        self.apply(outcome, window, cx);
     }
 
-    fn on_mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(from) = self.drag_from
-            && e.pressed_button == Some(MouseButton::Left)
-        {
-            let to = e.position;
-            let origin = point(from.x.min(to.x), from.y.min(to.y));
-            let size = size((from.x - to.x).abs(), (from.y - to.y).abs());
-            self.selection = Some(Bounds::new(origin, size));
-            cx.notify();
-        }
+    fn on_mouse_move(&mut self, e: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self.selector.pointer_move(self.to_frame(e.position));
+        self.apply(outcome, window, cx);
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.drag_from = None;
-        if self.selection.is_some_and(|s| {
-            f32::from(s.size.width) < MIN_DRAG || f32::from(s.size.height) < MIN_DRAG
-        }) {
-            self.selection = None;
-        }
-        self.deliver(window, cx);
+    fn on_mouse_up(&mut self, e: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let outcome = self
+            .selector
+            .pointer_up(self.to_frame(e.position), e.modifiers.shift);
+        self.apply(outcome, window, cx);
     }
 
     fn on_key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match e.keystroke.key.as_str() {
+        let key = e.keystroke.key.as_str();
+        let mods = e.keystroke.modifiers;
+        if let Some(arrow) = Arrow::from_key(key) {
+            let fast = mods.control || mods.platform;
+            let outcome = self.selector.arrow(arrow, mods.shift, fast);
+            self.apply(outcome, window, cx);
+            return;
+        }
+        match key {
             "escape" => session::finish(window, cx),
-            "enter" => self.deliver(window, cx),
+            "enter" => {
+                let outcome = self.selector.confirm();
+                self.apply(outcome, window, cx);
+            }
+            "c" => {
+                if let Some(hex) = self
+                    .selector
+                    .cursor()
+                    .and_then(|(x, y)| self.pixel(x, y))
+                    .map(hex)
+                {
+                    tracing::info!(colour = %hex, "colour copied");
+                    cx.write_to_clipboard(ClipboardItem::new_string(hex));
+                    session::finish(window, cx);
+                }
+            }
             _ => {}
         }
     }
+
+    /// Magnified pixels around the pointer with their colour and position, placed beside the
+    /// pointer and flipped away from the display edges.
+    fn loupe(&self, at: (i32, i32), pointer: Point<Pixels>) -> Div {
+        let half = LOUPE_CELLS / 2;
+        let side = LOUPE_CELLS as f32 * LOUPE_CELL;
+        let mut grid = div().flex().flex_col();
+        for dy in -half..=half {
+            let mut row = div().flex().flex_row();
+            for dx in -half..=half {
+                let colour = self.pixel(at.0 + dx, at.1 + dy).map_or(
+                    hsla(0., 0., 0., 1.),
+                    |[b, g, r, _]| {
+                        Rgba {
+                            r: f32::from(r) / 255.0,
+                            g: f32::from(g) / 255.0,
+                            b: f32::from(b) / 255.0,
+                            a: 1.0,
+                        }
+                        .into()
+                    },
+                );
+                let mut cell = div().w(px(LOUPE_CELL)).h(px(LOUPE_CELL)).bg(colour);
+                if dx == 0 && dy == 0 {
+                    cell = cell.border_1().border_color(hsla(0., 0., 1., 0.9));
+                }
+                row = row.child(cell);
+            }
+            grid = grid.child(row);
+        }
+        let label: SharedString = match self.pixel(at.0, at.1) {
+            Some(p) => format!("{}  {}, {}", hex(p), at.0, at.1),
+            None => format!("{}, {}", at.0, at.1),
+        }
+        .into();
+        let gap = px(18.);
+        let width = px(side + 8.);
+        let height = px(side + 30.);
+        let x = if pointer.x + gap + width > self.viewport.width {
+            pointer.x - gap - width
+        } else {
+            pointer.x + gap
+        };
+        let y = if pointer.y + gap + height > self.viewport.height {
+            pointer.y - gap - height
+        } else {
+            pointer.y + gap
+        };
+        div()
+            .absolute()
+            .left(x)
+            .top(y)
+            .p(px(4.))
+            .rounded(px(6.))
+            .bg(hsla(0., 0., 0.08, 0.92))
+            .border_1()
+            .border_color(hsla(0., 0., 1., 0.25))
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(grid)
+            .child(
+                div()
+                    .text_color(hsla(0., 0., 1., 1.))
+                    .text_size(px(11.))
+                    .child(label),
+            )
+    }
+}
+
+/// `#RRGGBB` for a BGRA pixel.
+fn hex([b, g, r, _]: [u8; 4]) -> String {
+    format!("#{r:02X}{g:02X}{b:02X}")
 }
 
 fn shade() -> Hsla {
@@ -179,54 +295,76 @@ impl Render for Overlay {
                     .size_full(),
             );
 
-        match self.selection {
-            None => {
-                root = root.child(div().absolute().size_full().bg(shade()));
-            }
-            Some(sel) => {
-                let x0 = sel.origin.x;
-                let y0 = sel.origin.y;
-                let x1 = sel.origin.x + sel.size.width;
-                let y1 = sel.origin.y + sel.size.height;
-                let band = |x: Pixels, y: Pixels, w: Pixels, h: Pixels| {
-                    div().absolute().left(x).top(y).w(w).h(h).bg(shade())
-                };
-                let r = self.selected_rect();
-                let label: SharedString = format!("{} × {}", r.width, r.height).into();
-                let label_y = if y0 > px(28.) {
-                    y0 - px(26.)
-                } else {
-                    y1 + px(6.)
-                };
-                root = root
-                    .child(band(px(0.), px(0.), vw, y0))
-                    .child(band(px(0.), y1, vw, vh - y1))
-                    .child(band(px(0.), y0, x0, sel.size.height))
-                    .child(band(x1, y0, vw - x1, sel.size.height))
-                    .child(
-                        div()
-                            .absolute()
-                            .left(x0)
-                            .top(y0)
-                            .w(sel.size.width)
-                            .h(sel.size.height)
-                            .border_1()
-                            .border_color(hsla(0., 0., 1., 0.9)),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .left(x0)
-                            .top(label_y)
-                            .px(px(6.))
-                            .py(px(2.))
-                            .rounded(px(4.))
-                            .bg(hsla(0., 0., 0., 0.75))
-                            .text_color(hsla(0., 0., 1., 1.))
-                            .text_size(px(12.))
-                            .child(label),
-                    );
-            }
+        let region = self.selector.region();
+        let (x0, y0, w, h) = self.to_logical(region);
+        let x1 = x0 + w;
+        let y1 = y0 + h;
+        let band = |x: Pixels, y: Pixels, w: Pixels, h: Pixels| {
+            div().absolute().left(x).top(y).w(w).h(h).bg(shade())
+        };
+        let (border, label) = if self.selector.is_hovering() {
+            (
+                hsla(0.58, 0.9, 0.6, 1.),
+                format!("{} × {}", region.width, region.height),
+            )
+        } else if self.selector.is_adjusting() {
+            (
+                hsla(0., 0., 1., 0.95),
+                format!(
+                    "{} × {}   arrows move · Shift+arrows resize · Enter copies",
+                    region.width, region.height
+                ),
+            )
+        } else {
+            (
+                hsla(0., 0., 1., 0.95),
+                format!("{} × {}", region.width, region.height),
+            )
+        };
+        let label: SharedString = label.into();
+        let label_y = if y0 > px(28.) {
+            y0 - px(26.)
+        } else {
+            y1 + px(6.)
+        };
+        let label_y = label_y.min(vh - px(24.)).max(px(2.));
+        // Hovering the bare desktop targets the whole display; dim it all so the frozen frame
+        // never passes for the live screen.
+        if self.selector.is_hovering() && region == Rect::new(0, 0, self.width, self.height) {
+            root = root.child(band(px(0.), px(0.), vw, vh));
+        }
+        root = root
+            .child(band(px(0.), px(0.), vw, y0))
+            .child(band(px(0.), y1, vw, vh - y1))
+            .child(band(px(0.), y0, x0, h))
+            .child(band(x1, y0, vw - x1, h))
+            .child(
+                div()
+                    .absolute()
+                    .left(x0)
+                    .top(y0)
+                    .w(w)
+                    .h(h)
+                    .border_2()
+                    .border_color(border),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(x0.max(px(2.)))
+                    .top(label_y)
+                    .px(px(6.))
+                    .py(px(2.))
+                    .rounded(px(4.))
+                    .bg(hsla(0., 0., 0., 0.75))
+                    .text_color(hsla(0., 0., 1., 1.))
+                    .text_size(px(12.))
+                    .child(label),
+            );
+        if let Some(at) = self.selector.cursor()
+            && window.is_window_hovered()
+        {
+            root = root.child(self.loupe(at, window.mouse_position()));
         }
         root
     }

@@ -7,10 +7,12 @@
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::shm::{self, ConnectionExt as _};
-use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, Window};
+use x11rb::protocol::xproto::{
+    Atom, AtomEnum, ConnectionExt as _, ImageFormat, MapState, Window, WindowClass,
+};
 use x11rb::rust_connection::RustConnection;
 
-use crate::{CaptureError, Display, Frame, Rect, Result};
+use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
 
 fn err(api: &'static str, e: impl std::fmt::Display) -> CaptureError {
     CaptureError::Platform {
@@ -28,6 +30,7 @@ pub(crate) struct Backend {
     conn: RustConnection,
     root: Window,
     screen: Rect,
+    atoms: Option<Atoms>,
     shm: Option<ShmSegment>,
     shm_available: bool,
 }
@@ -80,6 +83,7 @@ impl Backend {
             conn,
             root,
             screen: screen_rect,
+            atoms: None,
             shm: None,
             shm_available,
         })
@@ -166,6 +170,129 @@ impl Backend {
             r.width as usize * 4,
             &reply.data,
         ))
+    }
+
+    pub(crate) fn windows(&mut self) -> Result<Vec<WindowInfo>> {
+        let atoms = match self.atoms {
+            Some(a) => a,
+            None => {
+                let a = Atoms::intern(&self.conn)?;
+                self.atoms = Some(a);
+                a
+            }
+        };
+        let conn = &self.conn;
+        let tree = conn
+            .query_tree(self.root)
+            .map_err(|e| err("QueryTree", e))?
+            .reply()
+            .map_err(|e| err("QueryTree", e))?;
+        // Pipeline every request, then read the replies: one round trip per pass, not per window.
+        let attrs: Vec<_> = tree
+            .children
+            .iter()
+            .map(|&w| conn.get_window_attributes(w).ok())
+            .collect();
+        let geoms: Vec<_> = tree
+            .children
+            .iter()
+            .map(|&w| conn.translate_coordinates(w, self.root, 0, 0).ok())
+            .collect();
+        let sizes: Vec<_> = tree
+            .children
+            .iter()
+            .map(|&w| conn.get_geometry(w).ok())
+            .collect();
+        let mut tops = Vec::new();
+        for (((&w, a), g), sz) in tree.children.iter().zip(attrs).zip(geoms).zip(sizes) {
+            let (Some(a), Some(g), Some(sz)) = (
+                a.and_then(|c| c.reply().ok()),
+                g.and_then(|c| c.reply().ok()),
+                sz.and_then(|c| c.reply().ok()),
+            ) else {
+                continue;
+            };
+            if a.map_state != MapState::VIEWABLE
+                || a.class != WindowClass::INPUT_OUTPUT
+                || a.override_redirect
+                || sz.width < 2
+                || sz.height < 2
+            {
+                continue;
+            }
+            let bounds = Rect::new(
+                i32::from(g.dst_x),
+                i32::from(g.dst_y),
+                u32::from(sz.width),
+                u32::from(sz.height),
+            );
+            tops.push((w, bounds));
+        }
+        let mut out = Vec::with_capacity(tops.len());
+        // QueryTree lists children bottom to top; callers want front to back.
+        for (frame, bounds) in tops.into_iter().rev() {
+            // Reparenting window managers put the client inside a frame; the client carries the
+            // properties (WM_STATE marks it).
+            let client = find_client(conn, frame, atoms.wm_state, 2).unwrap_or(frame);
+            if let Some(kind) = card32(
+                conn,
+                client,
+                atoms.net_wm_window_type,
+                AtomEnum::ATOM.into(),
+            )
+            .and_then(|v| v.first().copied())
+                && (kind == atoms.type_desktop || kind == atoms.type_dock)
+            {
+                continue;
+            }
+            let mut bounds = bounds;
+            // GTK client-side decorations draw a shadow inside the window; trim it.
+            if let Some(ext) = card32(
+                conn,
+                client,
+                atoms.gtk_frame_extents,
+                AtomEnum::CARDINAL.into(),
+            ) && let [l, r, t, b] = ext[..]
+                && l + r < bounds.width
+                && t + b < bounds.height
+            {
+                bounds = Rect::new(
+                    bounds.x + l as i32,
+                    bounds.y + t as i32,
+                    bounds.width - l - r,
+                    bounds.height - t - b,
+                );
+            }
+            let title = text(conn, client, atoms.net_wm_name, atoms.utf8_string)
+                .or_else(|| {
+                    text(
+                        conn,
+                        client,
+                        AtomEnum::WM_NAME.into(),
+                        AtomEnum::STRING.into(),
+                    )
+                })
+                .unwrap_or_default();
+            let app = text(
+                conn,
+                client,
+                AtomEnum::WM_CLASS.into(),
+                AtomEnum::STRING.into(),
+            )
+            .and_then(|c| c.split('\0').nth(1).map(str::to_owned))
+            .unwrap_or_default();
+            let pid = card32(conn, client, atoms.net_wm_pid, AtomEnum::CARDINAL.into())
+                .and_then(|v| v.first().copied())
+                .unwrap_or(0);
+            out.push(WindowInfo {
+                id: u64::from(client),
+                pid,
+                app,
+                title,
+                bounds,
+            });
+        }
+        Ok(out)
     }
 
     fn capture_shm(&mut self, display_id: u64, r: Rect) -> Result<Frame> {
@@ -256,6 +383,103 @@ impl Drop for ShmSegment {
         // SAFETY: `addr` came from `shmat` and is detached exactly once.
         unsafe { libc::shmdt(self.addr.cast()) };
     }
+}
+
+#[derive(Clone, Copy)]
+struct Atoms {
+    wm_state: Atom,
+    net_wm_name: Atom,
+    net_wm_pid: Atom,
+    net_wm_window_type: Atom,
+    type_desktop: Atom,
+    type_dock: Atom,
+    gtk_frame_extents: Atom,
+    utf8_string: Atom,
+}
+
+impl Atoms {
+    fn intern(conn: &RustConnection) -> Result<Self> {
+        let names = [
+            "WM_STATE",
+            "_NET_WM_NAME",
+            "_NET_WM_PID",
+            "_NET_WM_WINDOW_TYPE",
+            "_NET_WM_WINDOW_TYPE_DESKTOP",
+            "_NET_WM_WINDOW_TYPE_DOCK",
+            "_GTK_FRAME_EXTENTS",
+            "UTF8_STRING",
+        ];
+        let cookies = names
+            .iter()
+            .map(|n| conn.intern_atom(false, n.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| err("InternAtom", e))?;
+        let mut atoms = Vec::with_capacity(names.len());
+        for c in cookies {
+            atoms.push(c.reply().map_err(|e| err("InternAtom", e))?.atom);
+        }
+        let [
+            wm_state,
+            net_wm_name,
+            net_wm_pid,
+            net_wm_window_type,
+            type_desktop,
+            type_dock,
+            gtk_frame_extents,
+            utf8_string,
+        ] = atoms[..]
+        else {
+            return Err(err("InternAtom", "missing reply"));
+        };
+        Ok(Self {
+            wm_state,
+            net_wm_name,
+            net_wm_pid,
+            net_wm_window_type,
+            type_desktop,
+            type_dock,
+            gtk_frame_extents,
+            utf8_string,
+        })
+    }
+}
+
+fn property(conn: &RustConnection, w: Window, prop: Atom, kind: Atom) -> Option<Vec<u8>> {
+    let reply = conn
+        .get_property(false, w, prop, kind, 0, 1024)
+        .ok()?
+        .reply()
+        .ok()?;
+    (reply.type_ != u32::from(AtomEnum::NONE)).then_some(reply.value)
+}
+
+fn card32(conn: &RustConnection, w: Window, prop: Atom, kind: Atom) -> Option<Vec<u32>> {
+    let bytes = property(conn, w, prop, kind)?;
+    let (words, _) = bytes.as_chunks::<4>();
+    Some(words.iter().map(|b| u32::from_ne_bytes(*b)).collect())
+}
+
+fn text(conn: &RustConnection, w: Window, prop: Atom, kind: Atom) -> Option<String> {
+    let bytes = property(conn, w, prop, kind)?;
+    let s = String::from_utf8_lossy(&bytes)
+        .trim_end_matches('\0')
+        .to_owned();
+    (!s.is_empty()).then_some(s)
+}
+
+/// The client window inside a window manager frame: the first descendant with WM_STATE.
+fn find_client(conn: &RustConnection, w: Window, wm_state: Atom, depth: u32) -> Option<Window> {
+    if property(conn, w, wm_state, AtomEnum::ANY.into()).is_some() {
+        return Some(w);
+    }
+    if depth == 0 {
+        return None;
+    }
+    let tree = conn.query_tree(w).ok()?.reply().ok()?;
+    tree.children
+        .iter()
+        .rev()
+        .find_map(|&c| find_client(conn, c, wm_state, depth - 1))
 }
 
 /// MIT-SHM needs the server on this machine; `DISPLAY=host:0` means it is not.

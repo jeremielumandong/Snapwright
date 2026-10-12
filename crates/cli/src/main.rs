@@ -24,6 +24,8 @@ struct Cli {
 enum Command {
     /// List connected displays.
     Displays,
+    /// List visible windows, front to back.
+    Windows,
     /// Capture displays to PNG files.
     Capture {
         /// Display id from `snapwright displays`; every display when omitted.
@@ -51,6 +53,7 @@ fn main() -> Result<()> {
         .init();
     match Cli::parse().command {
         Command::Displays => displays(),
+        Command::Windows => windows(),
         Command::Capture {
             display,
             region,
@@ -76,6 +79,23 @@ fn displays() -> Result<()> {
             d.name
         );
     }
+    Ok(())
+}
+
+fn windows() -> Result<()> {
+    let mut capturer = Capturer::new()?;
+    capturer.displays()?;
+    let t = Instant::now();
+    let windows = capturer.windows()?;
+    let took = t.elapsed();
+    for w in &windows {
+        let b = w.bounds;
+        println!(
+            "{:>10}  {:>5}x{:<5} at {:>5},{:<5} pid {:<7} {}  {}",
+            w.id, b.width, b.height, b.x, b.y, w.pid, w.app, w.title
+        );
+    }
+    eprintln!("{} windows listed in {}", windows.len(), ms(took));
     Ok(())
 }
 

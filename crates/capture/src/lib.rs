@@ -24,6 +24,11 @@ mod windows;
 
 pub use frame::{Frame, Rect};
 
+/// The frontmost window containing `(x, y)` (physical pixels), from a front-to-back list.
+pub fn window_at(windows: &[WindowInfo], x: i32, y: i32) -> Option<&WindowInfo> {
+    windows.iter().find(|w| w.bounds.contains(x, y))
+}
+
 #[cfg(target_os = "linux")]
 use linux::Backend;
 #[cfg(target_os = "macos")]
@@ -71,6 +76,22 @@ pub struct Display {
     pub primary: bool,
 }
 
+/// A top-level window on screen, for snapping a selection to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowInfo {
+    /// Platform window id (CGWindowID, X11 window, or HWND).
+    pub id: u64,
+    /// Owning process.
+    pub pid: u32,
+    /// Owning application, when the platform reports one.
+    pub app: String,
+    /// Window title; may be empty.
+    pub title: String,
+    /// Visible frame in physical pixels on the global desktop, like [`Display::bounds`].
+    /// Excludes invisible borders and drop shadows.
+    pub bounds: Rect,
+}
+
 /// A live connection to the platform's capture API.
 ///
 /// Create one and keep it: backends hold devices, connections and shared memory that are
@@ -101,6 +122,12 @@ impl Capturer {
     /// Captures one display at full resolution.
     pub fn capture_display(&mut self, display: &Display) -> Result<Frame> {
         self.backend.capture(display)
+    }
+
+    /// Lists visible top-level windows, front to back. Call it before showing any window of
+    /// your own, or filter those out by [`WindowInfo::pid`].
+    pub fn windows(&mut self) -> Result<Vec<WindowInfo>> {
+        self.backend.windows()
     }
 
     /// Captures every display, in the order [`Capturer::displays`] returns them.
