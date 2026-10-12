@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Snapwright icon simplified for 16-32 px: heavier brackets, a larger region, no dot. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="192" fill="#18181D"/>
+  <g fill="none" stroke="#E7E7EA" stroke-width="120" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 190 400 V 190 H 400"/>
+    <path d="M 624 190 H 834 V 400"/>
+    <path d="M 834 624 V 834 H 624"/>
+    <path d="M 400 834 H 190 V 624"/>
+  </g>
+  <rect x="352" y="352" width="320" height="320" rx="40" fill="#4A8FE6"/>
+</svg>

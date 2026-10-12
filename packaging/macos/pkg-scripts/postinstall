@@ -1,0 +1,5 @@
+#!/bin/sh
+# Put the `snapwright` CLI on PATH for .pkg installs.
+mkdir -p /usr/local/bin
+ln -sf "/Applications/Snapwright.app/Contents/MacOS/snapwright" /usr/local/bin/snapwright
+exit 0
