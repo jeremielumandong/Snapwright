@@ -53,6 +53,7 @@ crates/
   editor/   snapwright-editor   annotation scene (shapes, crop), tiny-skia renderer, undo history
   library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
+packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
 ```
 
 ## Rules
