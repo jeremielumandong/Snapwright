@@ -26,9 +26,14 @@ sleep 1
 pixel() { convert "$1" -format "%[pixel:p{$2,$3}]" info:; }
 fail() { echo "FAIL: $*"; cat "$OUT/app.log"; exit 1; }
 
-# 1. Hotkey shows the overlay (the frozen frame, dimmed); Esc closes it.
+# 1. Hotkey shows the overlay (the frozen frame, dimmed); Esc closes it. The first overlay's
+# first frame can take a few seconds on a software renderer, so poll for it.
 xdotool key ctrl+shift+2; sleep 1
-"$BIN/snapwright" capture -o "$OUT/overlay.png" 2>/dev/null
+for _ in $(seq 10); do
+  "$BIN/snapwright" capture -o "$OUT/overlay.png" 2>/dev/null
+  [ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(28,56,112,1)" ] && break
+  sleep 0.5
+done
 [ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(28,56,112,1)" ] || fail "overlay not shown dimmed"
 xdotool key Escape; sleep 1
 "$BIN/snapwright" capture -o "$OUT/after.png" 2>/dev/null
