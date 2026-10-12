@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>@font-face{font-family:"Geist";src:url("fonts/Geist.ttf") format("truetype");font-weight:100 900}body{margin:0;background:#dcdce0;font-family:"Geist",system-ui,sans-serif;-webkit-font-smoothing:antialiased}a{color:#2f6fd6}a:hover{color:#18181d}</style>
+</helmet>
+<section style="display:flex;flex-direction:column;gap:40px;padding:56px;color:#18181d">
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:900px">
+    <div style="font-size:32px;font-weight:600;letter-spacing:-0.02em">Snapwright — UI refresh</div>
+    <div style="font-size:15px;line-height:1.5;color:#5d5d66;text-wrap:pretty">Geist across the app (already bundled), one brand accent from the icon, a neutral palette that maps onto gpui-component's Theme fields, and 32px controls throughout. Everything is flex + borders + shadows, so it's all buildable in GPUI. Compare with <a href="Snapwright Current.dc.html">the current UI</a>.</div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="flex:1;min-width:420px;max-width:620px;padding:20px;border-radius:12px;background:#fff;display:flex;flex-direction:column;gap:12px">
+      <div style="font-weight:600">Theme tokens → gpui-component</div>
+      <div style="display:grid;grid-template-columns:150px 1fr 1fr;gap:6px 12px;font-size:12px;align-items:center">
+        <div style="color:#8b8b94">Theme field</div><div style="color:#8b8b94">Light</div><div style="color:#8b8b94">Dark</div>
+        <sc-for list="{{ tokens }}" as="t" hint-placeholder-count="10">
+          <div style="font-family:ui-monospace,monospace;font-size:11.5px">{{ t.f }}</div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:{{ t.l }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)"></span><span style="font-family:ui-monospace,monospace;font-size:11.5px;color:#5d5d66">{{ t.l }}</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:16px;height:16px;border-radius:4px;background:{{ t.d }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)"></span><span style="font-family:ui-monospace,monospace;font-size:11.5px;color:#5d5d66">{{ t.d }}</span></div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-width:320px;max-width:520px;padding:20px;border-radius:12px;background:#fff;display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.5;color:#3a3a42">
+      <div style="font-weight:600;color:#18181d">What changed</div>
+      <div><b>Library</b> — brand + capture button live in the window, grid grouped by day, titles lead (app is secondary), inspector actions collapsed to Copy / Edit plus two icon buttons, Trash moved to the footer.</div>
+      <div><b>Editor</b> — tools in a vertical rail grouped by purpose, with their shortcut shown; color and size in a floating bar that follows the active tool; Done/Copy on the right with clear primary.</div>
+      <div><b>HUDs</b> — one dark material shared by overlay, loupe, toast and countdown; keycaps replace long hint strings.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="font-size:18px;font-weight:600">Library</div>
+    <div style="display:flex;flex-wrap:wrap;gap:40px">
+      <div style="display:flex;flex-direction:column;gap:10px;--bg:#ffffff;--panel:#f7f7f8;--canvas:#efeff1;--fg:#18181d;--fg2:#5d5d66;--fg3:#8b8b94;--line:#e7e7ea;--line2:#d6d6db;--hover:#f0f0f2;--sel:#e7e7eb;--accent:#2f6fd6;--accent-fg:#ffffff;--accent-soft:#dce8fb;--thumb:#f4f4f6;--field:#ffffff;--danger:#d63b40;--shadow:0 20px 50px rgba(24,24,29,.14)">
+        <div style="font-size:13px;color:#5d5d66">Light</div>
+        <dc-import name="Library" hint-size="1200px,760px"></dc-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;--bg:#18181d;--panel:#141418;--canvas:#0e0e11;--fg:#ececef;--fg2:#a6a6b0;--fg3:#74747e;--line:#27272d;--line2:#36363e;--hover:#222228;--sel:#2a2a31;--accent:#4b8af0;--accent-fg:#ffffff;--accent-soft:rgba(75,138,240,.22);--thumb:#202026;--field:#1e1e24;--danger:#f0676b;--shadow:0 20px 50px rgba(0,0,0,.35)">
+        <div style="font-size:13px;color:#5d5d66">Dark</div>
+        <dc-import name="Library" hint-size="1200px,760px"></dc-import>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="font-size:18px;font-weight:600">Editor</div>
+    <div style="display:flex;flex-wrap:wrap;gap:40px">
+      <div style="display:flex;flex-direction:column;gap:10px;--bg:#ffffff;--panel:#f7f7f8;--canvas:#ececef;--fg:#18181d;--fg2:#5d5d66;--fg3:#8b8b94;--line:#e7e7ea;--line2:#d6d6db;--hover:#f0f0f2;--sel:#e7e7eb;--accent:#2f6fd6;--accent-fg:#ffffff;--accent-soft:#dce8fb;--thumb:#f4f4f6;--field:#ffffff;--danger:#d63b40;--shadow:0 20px 50px rgba(24,24,29,.14)">
+        <div style="font-size:13px;color:#5d5d66">Light</div>
+        <dc-import name="Editor" hint-size="1200px,720px"></dc-import>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;--bg:#18181d;--panel:#141418;--canvas:#0e0e11;--fg:#ececef;--fg2:#a6a6b0;--fg3:#74747e;--line:#27272d;--line2:#36363e;--hover:#222228;--sel:#2a2a31;--accent:#4b8af0;--accent-fg:#ffffff;--accent-soft:rgba(75,138,240,.22);--thumb:#202026;--field:#1e1e24;--danger:#f0676b;--shadow:0 20px 50px rgba(0,0,0,.35)">
+        <div style="font-size:13px;color:#5d5d66">Dark</div>
+        <dc-import name="Editor" hint-size="1200px,720px"></dc-import>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div style="font-size:18px;font-weight:600">Capture HUDs <span style="font-weight:400;font-size:13px;color:#5d5d66">— always dark: they sit over arbitrary screen content</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:40px;align-items:flex-start">
+      <div data-screen-label="Overlay" style="flex-shrink:0;width:1000px;height:620px;position:relative;overflow:hidden;border-radius:12px;background:#11131a;font-family:Geist,system-ui,sans-serif">
+        <img src="captures/dashboard.png" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+        <div style="position:absolute;left:0;top:0;right:0;height:240px;background:rgba(10,10,14,.5)"></div>
+        <div style="position:absolute;left:0;top:430px;right:0;bottom:0;background:rgba(10,10,14,.5)"></div>
+        <div style="position:absolute;left:0;top:240px;width:150px;height:190px;background:rgba(10,10,14,.5)"></div>
+        <div style="position:absolute;left:580px;top:240px;right:0;height:190px;background:rgba(10,10,14,.5)"></div>
+        <div style="position:absolute;left:150px;top:240px;width:430px;height:190px;box-sizing:border-box;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)"></div>
+        <sc-for list="{{ handles }}" as="h" hint-placeholder-count="8">
+          <div style="position:absolute;left:{{ h.x }}px;top:{{ h.y }}px;width:9px;height:9px;box-sizing:border-box;border-radius:2px;background:#fff;border:1px solid rgba(0,0,0,.35)"></div>
+        </sc-for>
+        <div style="position:absolute;left:150px;top:208px;height:24px;display:flex;align-items:center;gap:6px;padding:0 8px;border-radius:6px;background:rgba(24,24,29,.92);border:1px solid rgba(255,255,255,.12);color:#fff;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums">532 <span style="color:#8b8b94">×</span> 202<span style="color:#8b8b94;font-weight:400">px</span></div>
+        <div style="position:absolute;left:600px;top:444px;width:142px;box-sizing:border-box;padding:5px;border-radius:10px;background:rgba(24,24,29,.94);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:6px">
+          <div style="width:132px;height:132px;border-radius:6px;overflow:hidden;display:grid;grid-template-columns:repeat(11,12px);position:relative">
+            <sc-for list="{{ loupe }}" as="p" hint-placeholder-count="121"><div style="width:12px;height:12px;background:{{ p }}"></div></sc-for>
+            <div style="position:absolute;left:60px;top:60px;width:12px;height:12px;box-sizing:border-box;border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.5)"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;padding:0 3px 2px;font-size:11px;color:#fff;font-variant-numeric:tabular-nums">
+            <span style="width:10px;height:10px;border-radius:3px;background:#3d67da;box-shadow:inset 0 0 0 1px rgba(255,255,255,.3)"></span>
+            <div style="flex:1;font-weight:500">#3D67DA</div><div style="color:#8b8b94">930, 598</div>
+          </div>
+        </div>
+        <div style="position:absolute;left:50%;bottom:24px;transform:translateX(-50%);height:40px;display:flex;align-items:center;gap:16px;padding:0 14px;border-radius:12px;background:rgba(24,24,29,.94);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 30px rgba(0,0,0,.4);color:#c9c9d0;font-size:12px;white-space:nowrap">
+          <sc-for list="{{ hints }}" as="h" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:6px">
+              <sc-for list="{{ h.keys }}" as="k" hint-placeholder-count="1"><span style="min-width:20px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff">{{ k }}</span></sc-for>
+              {{ h.label }}
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="flex-shrink:0;display:flex;flex-direction:column;gap:32px;padding:24px;border-radius:12px;background:#2a2d38">
+        <div data-screen-label="Toast" style="width:280px;box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:8px 8px 12px;border-radius:14px;background:rgba(24,24,29,.96);border:1px solid rgba(255,255,255,.1);box-shadow:0 16px 40px rgba(0,0,0,.45);font-family:Geist,system-ui,sans-serif;position:relative;overflow:hidden">
+          <div style="height:150px;border-radius:8px;overflow:hidden;background:#0e0e11;display:flex;align-items:center;justify-content:center;position:relative">
+            <img src="captures/charts.png" style="max-width:100%;max-height:100%;display:block">
+            <div style="position:absolute;right:6px;top:6px;width:24px;height:24px;border-radius:7px;background:rgba(24,24,29,.8);display:flex;align-items:center;justify-content:center;color:#c9c9d0"><span style="width:13px;height:13px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/x.svg) center/contain no-repeat"></span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:0 4px">
+            <div style="width:24px;height:24px;border-radius:50%;background:rgba(48,164,108,.2);color:#3dd68c;display:flex;align-items:center;justify-content:center;flex-shrink:0"><span style="width:13px;height:13px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/check.svg) center/contain no-repeat"></span></div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px">
+              <div style="color:#fff;font-size:13px;font-weight:500">Copied to clipboard</div>
+              <div style="color:#8b8b94;font-size:11.5px;font-variant-numeric:tabular-nums">532 × 202 · click to open</div>
+            </div>
+            <div style="height:28px;display:flex;align-items:center;gap:6px;padding:0 10px;border-radius:7px;background:rgba(255,255,255,.1);color:#fff;font-size:12px;font-weight:500"><span style="width:13px;height:13px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/pencil.svg) center/contain no-repeat"></span>Edit</div>
+          </div>
+          <div style="position:absolute;left:0;bottom:0;height:2px;width:62%;background:#4b8af0"></div>
+        </div>
+        <div style="display:flex;gap:20px">
+          <sc-for list="{{ counts }}" as="c" hint-placeholder-count="3">
+            <div data-screen-label="Countdown" style="width:148px;height:148px;box-sizing:border-box;border-radius:32px;background:rgba(24,24,29,.9);border:1px solid rgba(255,255,255,.1);box-shadow:0 16px 40px rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-family:Geist,system-ui,sans-serif">
+              <div style="font-size:11px;font-weight:500;color:#8b8b94;letter-spacing:0.02em">Capturing in</div>
+              <div style="font-size:60px;line-height:1;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-0.02em">{{ c.n }}</div>
+              <div style="display:flex;gap:5px;margin-top:8px">
+                <sc-for list="{{ c.dots }}" as="d" hint-placeholder-count="3"><span style="width:6px;height:6px;border-radius:50%;background:{{ d }}"></span></sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const tokens = [
+      ['background','#ffffff','#18181d'],['sidebar','#f7f7f8','#141418'],['muted (canvas)','#efeff1','#0e0e11'],
+      ['foreground','#18181d','#ececef'],['muted_foreground','#8b8b94','#74747e'],['border','#e7e7ea','#27272d'],
+      ['input','#d6d6db','#36363e'],['sidebar_accent','#e7e7eb','#2a2a31'],['primary','#2f6fd6','#4b8af0'],['danger','#d63b40','#f0676b'],
+    ].map(([f, l, d]) => ({ f, l, d }));
+    const [x, y, w, h] = [150, 240, 430, 190];
+    const handles = [[0,0],[.5,0],[1,0],[0,.5],[1,.5],[0,1],[.5,1],[1,1]].map(([a, b]) => ({ x: x + a * w - 4.5, y: y + b * h - 4.5 }));
+    const loupe = [];
+    for (let r = 0; r < 11; r++) for (let c = 0; c < 11; c++) {
+      const bar = c >= 3 && c <= 8;
+      const t = r / 10;
+      loupe.push(bar ? `rgb(${Math.round(70 - t * 10)},${Math.round(120 - t * 20)},${Math.round(232 - t * 14)})` : (r < 2 ? '#ffffff' : '#f5f6f8'));
+    }
+    const hints = [
+      { keys: ['←', '→'], label: 'Move' },
+      { keys: ['⇧', '←'], label: 'Resize' },
+      { keys: ['↵'], label: 'Copy' },
+      { keys: ['Esc'], label: 'Cancel' },
+    ];
+    const counts = [3, 2, 1].map(n => ({ n, dots: [1, 2, 3].map(i => i <= n ? '#ffffff' : 'rgba(255,255,255,.18)') }));
+    return { tokens, handles, loupe, hints, counts };
+  }
+}
+</script>
+</body>
+</html>

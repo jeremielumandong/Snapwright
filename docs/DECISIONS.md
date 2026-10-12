@@ -140,3 +140,46 @@ names changed. Differences:
 - The Windows publisher check reads only `SNAPWRIGHT_SIGN_EXPECTED_SUBJECT`.
 
 Secrets and variables are listed in `docs/RELEASING.md`.
+
+## 2026-10-12: Wayland through wlr-screencopy, layer shell and a keybinding
+
+Pulled forward from Phase 2 because Jeremie runs Hyprland and the app refused to start there.
+
+- Capture uses `wlr-screencopy` into a reused `wl_shm` memfd buffer (wlroots compositors:
+  Hyprland, Sway, river, Wayfire). It came first because it is the protocol every wlroots
+  compositor has; `ext-image-copy-capture` and the portal (GNOME, KDE) are still to do, and
+  those sessions get `CaptureError::Unsupported`.
+- `Display::bounds` on Wayland is the output's logical (`xdg-output`) position times its scale,
+  with the copied buffer's size, so "physical pixels" holds and the app's `bounds / scale`
+  gives the logical rectangle as elsewhere. Rotated and flipped outputs are refused until
+  someone can test them.
+- Copies wait at most 2 s: a compositor copies on its next repaint, and a display in DPMS
+  sleep never repaints.
+- The window list comes from Hyprland's IPC socket; other compositors get no snapping.
+- Overlay, preview and countdown are `zwlr_layer_shell_v1` surfaces on the overlay layer (a
+  normal Wayland window would be tiled). The overlay takes the keyboard exclusively, and its
+  GPUI display is found by the UUID GPUI derives from the connector name.
+- Wayland has no global key grabs, so the app is single-instance on Linux: a second launch
+  sends its flags (`--capture-now`, `--repeat-last`, `--library`, …) to the running app over
+  `$XDG_RUNTIME_DIR/snapwright-<display>.sock` and exits. Users bind
+  `snapwright-app --capture-now` in their compositor. A launch with no flags opens the library.
+- arboard's `wayland-data-control` feature puts images on the Wayland clipboard.
+
+## 2026-10-12: UI refresh from the design handoff
+
+The design (`docs/design/Snapwright Redesign.dc.html` with its Library and Editor pages) is
+the reference; `crates/app/src/theme.rs` holds its tokens.
+
+- Windows follow the system light/dark setting (`theme::sync` on appearance changes); the
+  capture HUDs are always dark because they sit over arbitrary screen content.
+- The palette is pushed into gpui-component's `Theme`, including the `button_*` fields its
+  buttons read (they do not use `primary`), so library and editor controls match the custom
+  elements around them.
+- Geist is bundled as static Regular, Medium and SemiBold (from Switchyard); GPUI does not pick
+  weights out of the editor's variable `Geist.ttf`.
+- The library grid became a variable-height `list` so each day gets a header row; arrow keys
+  move by grid row across those headers (`step_vertical`).
+- The note saves when the field loses focus instead of on Enter, since it is now multi-line.
+- Not built from the design: drag handles on the overlay selection (no handle dragging yet)
+  and the image drop shadow inside thumbnails (`object_fit` boxes have no fitted bounds to
+  shadow).

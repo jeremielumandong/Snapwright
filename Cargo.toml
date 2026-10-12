@@ -42,11 +42,15 @@ gpui-kit = "=0.7.1"
 image = { version = "0.25", default-features = false }
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
 global-hotkey = "0.8"
-# Linux clipboard images: GPUI's X11 clipboard writes text only.
-arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+# Linux clipboard images: GPUI's X11 clipboard writes text only. On Wayland arboard uses the
+# data-control protocol (wlroots compositors, KDE).
+arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 
 # Linux
 x11rb = { version = "0.14", features = ["randr", "shm"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 libc = "0.2"
 
 # Windows

@@ -80,8 +80,13 @@ site/                           marketing site (static HTML, deployed by .github
   timeout reuse the last staging texture.
 - X11: Xvfb resets the root window when its last client disconnects; tests keep a
   connection open while they paint. Tests that paint the root window must not run in parallel.
-- Wayland: an X11 `GetImage` under XWayland sees only X clients, so Wayland sessions are
-  refused until the portal backend exists.
+- Wayland: capture is `wlr-screencopy` (wlroots compositors only; GNOME/KDE wait for the
+  portal backend). `snapwright_capture::wayland_session()` picks the backend and makes
+  pop-ups layer-shell surfaces (`session::popup_kind`). No global hotkeys there: the app is
+  single-instance (`instance.rs`) and users bind `snapwright-app --capture-now` in the
+  compositor. Screencopy waits for a repaint, so it times out while the display sleeps.
+- Running the Xvfb scripts from a Wayland desktop needs `env -u WAYLAND_DISPLAY
+  XDG_SESSION_TYPE=x11`, or the app and tests pick the Wayland backend.
 - GPUI: `window.remove_window()` through a window's own handle fails while that window is
   being updated (its event handlers run inside that update). Close the current window
   directly and the others through their handles (`session::finish`).
@@ -105,5 +110,12 @@ site/                           marketing site (static HTML, deployed by .github
   `toast::SETTLE`.
 - `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
   converted, so capture frames go in as they are. `image` must be the version GPUI links.
+- Colours come from `theme::palette(cx)` (windows) or `theme::hud` (overlay, loupe, preview,
+  countdown); `docs/design/` is the reference. gpui-component buttons read `button_primary*`
+  and `button*`, not `primary`; `theme::apply` sets both.
+- Geist has no ⌘ ⌥ ⌃ ⌫ glyphs and Linux shows a box for them; keycap text goes through
+  `theme::key_label`.
+- After a rebuild, a running dev app's `/proc/<pid>/exe` ends in ` (deleted)`; match by prefix
+  when stopping it, or `--library` and friends get forwarded to the stale instance.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
   full-screen overlay. `tracing` macros shadow a local named `display`.
