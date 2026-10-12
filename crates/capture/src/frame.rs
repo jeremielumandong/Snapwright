@@ -24,6 +24,15 @@ impl Rect {
         }
     }
 
+    /// Whether the point is inside (right and bottom edges excluded).
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        let (x, y) = (i64::from(x), i64::from(y));
+        x >= i64::from(self.x)
+            && y >= i64::from(self.y)
+            && x < i64::from(self.x) + i64::from(self.width)
+            && y < i64::from(self.y) + i64::from(self.height)
+    }
+
     /// The overlap of two rectangles, or `None` when they do not overlap.
     pub fn intersect(&self, other: &Rect) -> Option<Rect> {
         let x0 = self.x.max(other.x);
@@ -139,6 +148,16 @@ pub(crate) fn bgra_to_rgba_in_place(data: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contains_excludes_far_edges() {
+        let r = Rect::new(-10, 5, 20, 10);
+        assert!(r.contains(-10, 5));
+        assert!(r.contains(9, 14));
+        assert!(!r.contains(10, 5));
+        assert!(!r.contains(0, 15));
+        assert!(!r.contains(-11, 6));
+    }
 
     fn gradient(width: u32, height: u32) -> Frame {
         let mut data = Vec::new();

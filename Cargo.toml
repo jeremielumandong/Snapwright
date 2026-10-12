@@ -26,6 +26,7 @@ directories = "6"
 # lockstep, as in Switchyard. `image` must match the version gpui links (its `Frame` type).
 gpui-kit = "=0.7.1"
 image = { version = "0.25", default-features = false }
+tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
 global-hotkey = "0.8"
 # Linux clipboard images: GPUI's X11 clipboard writes text only.
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
@@ -42,7 +43,7 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFData", "CFCGTypes"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGDirectDisplay", "objc2"] }
-objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "libc", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
 block2 = "0.6"
 
 [workspace.lints.rust]

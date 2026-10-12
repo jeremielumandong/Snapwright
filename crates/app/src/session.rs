@@ -10,7 +10,7 @@ use gpui_kit::{
 };
 #[cfg(not(target_os = "linux"))]
 use gpui_kit::{ClipboardItem, Image, ImageFormat};
-use snapwright_capture::{Capturer, Display, Frame};
+use snapwright_capture::{Capturer, Display, Frame, Rect, WindowInfo};
 
 use crate::output;
 use crate::overlay::Overlay;
@@ -33,6 +33,10 @@ struct Active {
     windows: Vec<AnyWindowHandle>,
 }
 impl Global for Active {}
+
+/// See `open_overlays`.
+#[cfg(target_os = "linux")]
+const X11_SHIFT: f32 = 2.0;
 
 /// Connects to the platform capture API once, at startup.
 pub fn init(cx: &mut App) -> snapwright_capture::Result<()> {
@@ -82,24 +86,31 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
             .lock()
             .map_err(|_| anyhow::anyhow!("capture backend poisoned by an earlier panic"))?;
         let displays = capturer.displays()?;
-        displays
+        let shots = displays
             .into_iter()
             .map(|d| capturer.capture_display(&d).map(|f| (d, f)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(anyhow::Error::from)
+            .collect::<Result<Vec<_>, _>>()?;
+        // Listed before any overlay opens, so none of ours are in it. Snapping is a nicety:
+        // a failure here still shows the overlay.
+        let windows = capturer.windows().unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "window list unavailable; snapping off");
+            Vec::new()
+        });
+        anyhow::Ok((shots, windows))
     });
     cx.spawn(async move |cx| {
         let shots = grab.await;
         cx.update(|cx| {
             cx.global_mut::<Active>().capturing = false;
             match shots {
-                Ok(shots) => {
+                Ok((shots, windows)) => {
                     tracing::debug!(
                         ms = pressed_at.elapsed().as_secs_f64() * 1000.0,
                         displays = shots.len(),
+                        windows = windows.len(),
                         "captured"
                     );
-                    open_overlays(shots, pressed_at, cx);
+                    open_overlays(shots, &windows, pressed_at, cx);
                 }
                 Err(e) => tracing::error!(error = %e, "capture failed"),
             }
@@ -108,7 +119,34 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
     .detach();
 }
 
-fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App) {
+/// Snap targets for one display: other processes' windows, in that frame's pixels.
+fn snap_targets(display: &Display, frame: &Frame, windows: &[WindowInfo]) -> Vec<Rect> {
+    let own = std::process::id();
+    let b = display.bounds;
+    // Frames can differ from the display's reported size (scaling); map proportionally.
+    let sx = frame.width as f32 / b.width.max(1) as f32;
+    let sy = frame.height as f32 / b.height.max(1) as f32;
+    windows
+        .iter()
+        .filter(|w| w.pid != own)
+        .filter_map(|w| w.bounds.intersect(&b))
+        .map(|r| {
+            Rect::new(
+                ((r.x - b.x) as f32 * sx).round() as i32,
+                ((r.y - b.y) as f32 * sy).round() as i32,
+                (r.width as f32 * sx).round() as u32,
+                (r.height as f32 * sy).round() as u32,
+            )
+        })
+        .collect()
+}
+
+fn open_overlays(
+    shots: Vec<(Display, Frame)>,
+    on_screen: &[WindowInfo],
+    pressed_at: Instant,
+    cx: &mut App,
+) {
     let screens = cx.displays();
     let mut windows = Vec::with_capacity(shots.len());
     for (display, frame) in shots {
@@ -123,10 +161,17 @@ fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App
             let o = d.bounds().origin;
             (o.x - wanted.origin.x).abs() < px(2.) && (o.y - wanted.origin.y).abs() < px(2.)
         });
+        let bounds = screen.map(|d| d.bounds()).unwrap_or(wanted);
+        // GPUI's X11 backend creates every window 2 px right of where it was asked (a Zed
+        // workaround for GNOME). Override-redirect pop-ups keep that shift, which would offset
+        // the frozen frame from the real screen, so ask for 2 px less.
+        #[cfg(target_os = "linux")]
+        let bounds = Bounds::new(
+            point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
+            bounds.size,
+        );
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(
-                screen.map(|d| d.bounds()).unwrap_or(wanted),
-            )),
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
             display_id: screen.map(|d| d.id()),
             titlebar: None,
             focus: true,
@@ -139,8 +184,9 @@ fn open_overlays(shots: Vec<(Display, Frame)>, pressed_at: Instant, cx: &mut App
             app_id: Some("snapwright".into()),
             ..Default::default()
         };
+        let targets = snap_targets(&display, &frame, on_screen);
         match cx.open_window(options, |window, cx| {
-            cx.new(|cx| Overlay::new(frame, pressed_at, window, cx))
+            cx.new(|cx| Overlay::new(frame, targets, pressed_at, window, cx))
         }) {
             Ok(handle) => windows.push(handle.into()),
             Err(e) => {
@@ -207,4 +253,43 @@ pub fn deliver(frame: Frame, pressed_at: Instant, current: &mut Window, cx: &mut
         }
     })
     .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snap_targets_are_display_local_clipped_and_skip_our_windows() {
+        let display = Display {
+            id: 1,
+            name: "right".into(),
+            bounds: Rect::new(1920, 0, 2560, 1440),
+            scale: 1.0,
+            primary: false,
+        };
+        let frame = Frame {
+            display_id: 1,
+            width: 2560,
+            height: 1440,
+            data: Vec::new(),
+        };
+        let window = |pid, bounds| WindowInfo {
+            id: 0,
+            pid,
+            app: String::new(),
+            title: String::new(),
+            bounds,
+        };
+        let windows = [
+            window(1, Rect::new(2000, 100, 800, 600)),
+            window(1, Rect::new(1800, 50, 300, 300)), // straddles both displays
+            window(1, Rect::new(0, 0, 500, 500)),     // other display only
+            window(std::process::id(), Rect::new(1920, 0, 2560, 1440)),
+        ];
+        assert_eq!(
+            snap_targets(&display, &frame, &windows),
+            vec![Rect::new(80, 100, 800, 600), Rect::new(0, 50, 180, 300)]
+        );
+    }
 }

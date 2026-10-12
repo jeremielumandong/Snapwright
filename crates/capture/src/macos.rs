@@ -18,7 +18,7 @@ use objc2_screen_capture_kit::{
     SCContentFilter, SCDisplay, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
 };
 
-use crate::{CaptureError, Display, Frame, Rect, Result};
+use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
 
 /// `kCVPixelFormatType_32BGRA` ('BGRA').
 const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241;
@@ -65,29 +65,97 @@ struct Target {
     pixel_height: usize,
 }
 
-// SAFETY: ScreenCaptureKit filters are immutable after creation and owned by this backend;
-// `Capturer` takes `&mut self` for every call, so they are never shared between threads.
+// SAFETY: ScreenCaptureKit filters and content snapshots are immutable after creation and
+// owned by this backend; `Capturer` takes `&mut self` for every call, so they are never shared
+// between threads.
 unsafe impl Send for Backend {}
 
 pub(crate) struct Backend {
+    /// The last shareable-content snapshot: displays and windows.
+    content: Retained<SCShareableContent>,
     targets: Vec<Target>,
 }
 
 impl Backend {
     pub(crate) fn new() -> Result<Self> {
+        let content = load_content()?;
         Ok(Self {
-            targets: load_targets()?,
+            targets: targets(&content),
+            content,
         })
     }
 
+    fn refresh(&mut self) -> Result<()> {
+        self.content = load_content()?;
+        self.targets = targets(&self.content);
+        Ok(())
+    }
+
+    /// Windows from the snapshot taken by the last `displays` call, so a session that lists
+    /// displays, captures, then lists windows pays for one ScreenCaptureKit query.
+    pub(crate) fn windows(&mut self) -> Result<Vec<WindowInfo>> {
+        // SAFETY: plain getters on a delivered, immutable snapshot.
+        let windows = unsafe { self.content.windows() };
+        let mut out = Vec::new();
+        for w in windows.iter() {
+            // SAFETY: as above.
+            let (id, frame, layer, on_screen, title, owner) = unsafe {
+                (
+                    w.windowID(),
+                    w.frame(),
+                    w.windowLayer(),
+                    w.isOnScreen(),
+                    w.title(),
+                    w.owningApplication(),
+                )
+            };
+            // Layer 0 holds normal app windows; menus, the Dock and overlays sit above it.
+            if !on_screen || layer != 0 || frame.size.width < 2.0 || frame.size.height < 2.0 {
+                continue;
+            }
+            // Points to pixels with the scale of the display holding the window's centre, the
+            // same rule display bounds use.
+            let cx = frame.origin.x + frame.size.width / 2.0;
+            let cy = frame.origin.y + frame.size.height / 2.0;
+            let scale = self
+                .targets
+                .iter()
+                .find(|t| {
+                    let b = &t.display.bounds;
+                    let s = f64::from(t.display.scale);
+                    cx >= f64::from(b.x) / s
+                        && cy >= f64::from(b.y) / s
+                        && cx < (f64::from(b.x) + f64::from(b.width)) / s
+                        && cy < (f64::from(b.y) + f64::from(b.height)) / s
+                })
+                .map_or(1.0, |t| f64::from(t.display.scale));
+            let x0 = (frame.origin.x * scale).round();
+            let y0 = (frame.origin.y * scale).round();
+            let x1 = ((frame.origin.x + frame.size.width) * scale).round();
+            let y1 = ((frame.origin.y + frame.size.height) * scale).round();
+            // SAFETY: plain getters on the owning application.
+            let (pid, app) = owner.map_or((0, String::new()), |o| unsafe {
+                (o.processID().max(0) as u32, o.applicationName().to_string())
+            });
+            out.push(WindowInfo {
+                id: u64::from(id),
+                pid,
+                app,
+                title: title.map(|t| t.to_string()).unwrap_or_default(),
+                bounds: Rect::new(x0 as i32, y0 as i32, (x1 - x0) as u32, (y1 - y0) as u32),
+            });
+        }
+        Ok(out)
+    }
+
     pub(crate) fn displays(&mut self) -> Result<Vec<Display>> {
-        self.targets = load_targets()?;
+        self.refresh()?;
         Ok(self.targets.iter().map(|t| t.display.clone()).collect())
     }
 
     pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
         if !self.targets.iter().any(|t| t.display.id == display.id) {
-            self.targets = load_targets()?;
+            self.refresh()?;
         }
         let Some(target) = self.targets.iter().find(|t| t.display.id == display.id) else {
             return Err(CaptureError::NoSuchDisplay(display.id));
@@ -119,7 +187,7 @@ impl Backend {
     }
 }
 
-fn load_targets() -> Result<Vec<Target>> {
+fn load_content() -> Result<Retained<SCShareableContent>> {
     let (tx, rx) = mpsc::sync_channel(1);
     let block = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
@@ -137,10 +205,14 @@ fn load_targets() -> Result<Vec<Target>> {
         .recv_timeout(TIMEOUT)
         .map_err(|_| timeout("SCShareableContent"))??
         .0;
+    Ok(content)
+}
+
+fn targets(content: &SCShareableContent) -> Vec<Target> {
     let main = CGMainDisplayID();
     // SAFETY: plain getters on a delivered object.
     let displays = unsafe { content.displays() };
-    Ok(displays.iter().map(|d| target(&d, main)).collect())
+    displays.iter().map(|d| target(&d, main)).collect()
 }
 
 fn target(display: &SCDisplay, main: u32) -> Target {
