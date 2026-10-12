@@ -34,6 +34,11 @@ fn err(api: &'static str, e: windows::core::Error) -> CaptureError {
     }
 }
 
+// SAFETY: the D3D11 devices are free-threaded and the immediate contexts, duplications and
+// staging textures are owned by this backend alone; `Capturer` takes `&mut self` for every
+// call, so they are only ever used from one thread at a time.
+unsafe impl Send for Backend {}
+
 pub(crate) struct Backend {
     outputs: Vec<Output>,
 }

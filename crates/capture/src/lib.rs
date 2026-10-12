@@ -79,6 +79,12 @@ pub struct Capturer {
     backend: Backend,
 }
 
+// Captures run off the UI thread, so the capturer must move between threads.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<Capturer>();
+};
+
 impl Capturer {
     /// Connects to the platform capture API.
     pub fn new() -> Result<Self> {

@@ -19,6 +19,11 @@ fn err(api: &'static str, e: impl std::fmt::Display) -> CaptureError {
     }
 }
 
+// SAFETY: the X connection is owned and the shared memory segment is private to this
+// backend; `Capturer` takes `&mut self` for every call, so it is never used from two threads
+// at once.
+unsafe impl Send for Backend {}
+
 pub(crate) struct Backend {
     conn: RustConnection,
     root: Window,

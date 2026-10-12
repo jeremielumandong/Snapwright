@@ -65,6 +65,10 @@ struct Target {
     pixel_height: usize,
 }
 
+// SAFETY: ScreenCaptureKit filters are immutable after creation and owned by this backend;
+// `Capturer` takes `&mut self` for every call, so they are never shared between threads.
+unsafe impl Send for Backend {}
+
 pub(crate) struct Backend {
     targets: Vec<Target>,
 }
