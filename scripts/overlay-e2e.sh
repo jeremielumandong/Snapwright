@@ -14,7 +14,14 @@ trap 'kill $PID 2>/dev/null || true' EXIT
 # Paint after the app connects: Xvfb resets the root window when its last client leaves.
 sleep 1
 xsetroot -mod 16 16 -fg '#ff6600' -bg '#3366cc'
-sleep 5 # GPU warm-up on a software renderer
+# GPU setup on a software renderer takes from 3 s to well over 10 s on hosted runners; the
+# hotkeys are registered once it is done. Then give the hidden warm-up window a frame.
+for _ in $(seq 120); do
+  grep -q "hotkey registered" "$OUT/app.log" && break
+  sleep 0.5
+done
+grep -q "hotkey registered" "$OUT/app.log" || { echo "FAIL: app not ready after 60 s"; cat "$OUT/app.log"; exit 1; }
+sleep 1
 
 pixel() { convert "$1" -format "%[pixel:p{$2,$3}]" info:; }
 fail() { echo "FAIL: $*"; cat "$OUT/app.log"; exit 1; }

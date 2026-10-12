@@ -22,7 +22,14 @@ PID=$!
 trap 'kill $PID 2>/dev/null || true' EXIT
 sleep 1
 xsetroot -mod 16 16 -fg '#ff6600' -bg '#3366cc'
-sleep 5 # GPU warm-up on a software renderer
+# GPU setup on a software renderer takes from 3 s to well over 10 s on hosted runners; the
+# hotkeys are registered once it is done. Then give the hidden warm-up window a frame.
+for _ in $(seq 120); do
+  grep -q "hotkey registered" "$OUT/bench.log" && break
+  sleep 0.5
+done
+grep -q "hotkey registered" "$OUT/bench.log" || { echo "FAIL: app not ready after 60 s"; cat "$OUT/bench.log"; exit 1; }
+sleep 1
 
 for _ in $(seq "$RUNS"); do
   xdotool key ctrl+shift+2; sleep 0.6
