@@ -1,8 +1,7 @@
-//! Linux backend. X11 through MIT-SHM, which copies the root window into shared memory
-//! in one server-side blit, with a plain `GetImage` when SHM is missing (remote displays).
+//! Linux X11 backend: MIT-SHM, which copies the root window into shared memory in one
+//! server-side blit, with a plain `GetImage` when SHM is missing (remote displays).
 //!
-//! Wayland sessions are refused for now: an X11 `GetImage` under XWayland returns only X
-//! clients. The portal and `ext-image-copy-capture` backends land in Phase 2.
+//! Not used in Wayland sessions: an X11 `GetImage` under XWayland returns only X clients.
 
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::randr::ConnectionExt as _;
@@ -44,14 +43,6 @@ struct ShmSegment {
 
 impl Backend {
     pub(crate) fn new() -> Result<Self> {
-        if std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t == "wayland")
-            || (std::env::var_os("DISPLAY").is_none()
-                && std::env::var_os("WAYLAND_DISPLAY").is_some())
-        {
-            return Err(CaptureError::Unsupported(
-                "Wayland sessions need the portal backend (planned for Phase 2)".into(),
-            ));
-        }
         let (conn, screen_num) = x11rb::connect(None).map_err(|e| err("XOpenDisplay", e))?;
         let screen = &conn.setup().roots[screen_num];
         let root = screen.root;
