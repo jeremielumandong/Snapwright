@@ -11,7 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 snapwright-capture.workspace = true
+snapwright-library.workspace = true
 anyhow.workspace = true
+chrono.workspace = true
 directories.workspace = true
 futures.workspace = true
 global-hotkey.workspace = true
