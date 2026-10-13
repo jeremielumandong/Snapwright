@@ -139,4 +139,38 @@ xclip -selection clipboard -t image/png -o > "$OUT/corner-again.png"
 [ "$(compare -metric AE "$OUT/corner.png" "$OUT/corner-again.png" null: 2>&1)" = "0" ] \
   || fail "the preview got into a repeat capture"
 
+# 9. T in the overlay copies the text in the selection; captures get their text indexed.
+convert -size 640x140 xc:white -font DejaVu-Sans -pointsize 30 -fill black \
+  -annotate +24+56 'Snapwright reads text' -annotate +24+108 'Invoice 4821 overdue' "$OUT/text.png"
+display -geometry +200+300 -title text-sample "$OUT/text.png" &
+VIEWER=$!
+trap 'kill $PID $VIEWER 2>/dev/null || true' EXIT
+sleep 2
+xdotool key ctrl+shift+2; sleep 1
+xdotool mousemove 210 310 mousedown 1 mousemove 500 380 mousemove 830 430; sleep 0.3
+xdotool keydown shift mouseup 1 keyup shift; sleep 0.5
+xdotool key t
+got=""
+for _ in $(seq 40); do
+  got=$(timeout 5 xclip -selection clipboard -o 2>/dev/null || true)
+  echo "$got" | grep -q "overdue" && break
+  sleep 0.5
+done
+echo "$got" | grep -qi "snapwright reads text" || fail "copy text: got '$got'"
+echo "$got" | grep -q "4821" || fail "copy text: got '$got'"
+xdotool key ctrl+shift+2; sleep 1
+xdotool mousemove 210 310 mousedown 1 mousemove 500 380 mousemove 830 430; sleep 0.3
+xdotool mouseup 1; sleep 1.5
+kill $VIEWER 2>/dev/null || true
+DB=$(find "$HOME" -name library.sqlite3 -print -quit)
+indexed() {
+  python3 -c 'import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+q = "SELECT count(*) FROM captures_fts WHERE captures_fts MATCH ?"
+sys.exit(0 if db.execute(q, ("invoice* AND overdue*",)).fetchone()[0] else 1)' "$DB"
+}
+for _ in $(seq 60); do indexed && break; sleep 1; done
+indexed || fail "capture text not indexed"
+grep -E "text copied|capture text indexed" "$OUT/app.log" | sed 's/\x1b\[[0-9;]*m//g'
+
 echo "PASS"

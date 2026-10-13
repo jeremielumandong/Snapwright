@@ -1,7 +1,8 @@
 //! The selection overlay: one borderless window per display showing that display's frozen
 //! frame. Hover highlights a window, a click takes it, a drag selects a region; see
 //! [`crate::selection`] for the whole interaction. A loupe beside the pointer shows the pixels
-//! under it and their colour; `C` copies that colour as hex. Esc cancels.
+//! under it and their colour; `C` copies that colour as hex, `T` the text in the selection (or
+//! the hovered window). Esc cancels.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -121,22 +122,33 @@ impl Overlay {
         }
     }
 
-    fn deliver(&mut self, r: Rect, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(bytes) = self.image.as_bytes(0) else {
-            return;
-        };
+    /// The pixels of `r`, clipped to the frame, and the clipped rectangle.
+    fn crop(&self, r: Rect) -> Option<(Rect, Frame)> {
+        let bytes = self.image.as_bytes(0)?;
         // Crop straight from the image's pixels: one copy of the selected rows only.
-        let Some(r) = r.intersect(&Rect::new(0, 0, self.width, self.height)) else {
-            return;
-        };
+        let r = r.intersect(&Rect::new(0, 0, self.width, self.height))?;
         let stride = self.width as usize * 4;
         let start = r.y as usize * stride + r.x as usize * 4;
-        let Some(rows) = bytes.get(start..) else {
+        let rows = bytes.get(start..)?;
+        let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
+        Some((r, frame))
+    }
+
+    fn deliver(&mut self, r: Rect, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((r, frame)) = self.crop(r) else {
             return;
         };
-        let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
         let meta = session::describe(r, self.width, self.height, &self.targets, self.display_id);
         session::deliver(frame, r, meta, self.pressed_at, window, cx);
+    }
+
+    /// Copies the text in the selection (or the hovered window) instead of its pixels.
+    fn copy_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((_, frame)) = self.crop(self.selector.region()) else {
+            return;
+        };
+        session::finish(window, cx);
+        crate::ocr::copy_text(frame, cx);
     }
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -183,6 +195,7 @@ impl Overlay {
                     session::finish(window, cx);
                 }
             }
+            "t" if !mods.control && !mods.platform => self.copy_text(window, cx),
             _ => {}
         }
     }
@@ -335,11 +348,13 @@ impl Overlay {
             bar.child(theme::hud_hint(&["left", "right"], "Move"))
                 .child(theme::hud_hint(&["shift", "left"], "Resize"))
                 .child(theme::hud_hint(&["enter"], "Copy"))
+                .child(theme::hud_hint(&["T"], "Copy text"))
                 .child(theme::hud_hint(&["escape"], "Cancel"))
         } else {
             bar.child("Click a window or drag a region")
                 .child(theme::hud_hint(&["shift"], "Adjust"))
                 .child(theme::hud_hint(&["C"], "Copy colour"))
+                .child(theme::hud_hint(&["T"], "Copy text"))
                 .child(theme::hud_hint(&["escape"], "Cancel"))
         };
         let row = div().absolute().left_0().w_full().flex().justify_center();

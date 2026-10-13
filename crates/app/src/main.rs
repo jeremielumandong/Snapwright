@@ -11,6 +11,7 @@ mod hotkey;
 #[cfg(target_os = "linux")]
 mod instance;
 mod library_view;
+mod ocr;
 mod output;
 mod overlay;
 mod selection;
@@ -83,6 +84,7 @@ fn main() -> Result<()> {
                 cx.quit();
                 return;
             }
+            ocr::init(cx);
             #[cfg(target_os = "linux")]
             if let Some(mut launches) = later_launches {
                 cx.spawn(async move |cx| {
