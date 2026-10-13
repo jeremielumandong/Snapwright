@@ -142,7 +142,14 @@ jobs:
           if [[ "$SIGNED" == 'true' ]]; then
             codesign --verify --deep --strict --verbose=2 "$app"
             spctl --assess --type execute --verbose "$app"
-            xcrun stapler validate "$dmg"
+            # stapler fetches the ticket from Apple's CloudKit; a dropped connection there
+            # (NSURLErrorDomain -1005, exit 68) is not a notarization failure, so retry it.
+            for attempt in 1 2 3 4 5; do
+              xcrun stapler validate "$dmg" && break
+              [[ $attempt -lt 5 ]] || { echo "::error::stapler validate failed $attempt times"; exit 1; }
+              echo "::warning::stapler validate failed (attempt $attempt); retrying in $((attempt * 15)) s"
+              sleep $((attempt * 15))
+            done
           fi
           hdiutil detach "$mount" >/dev/null
       - name: Write checksum
