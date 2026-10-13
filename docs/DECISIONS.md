@@ -183,3 +183,28 @@ the reference; `crates/app/src/theme.rs` holds its tokens.
 - Not built from the design: drag handles on the overlay selection (no handle dragging yet)
   and the image drop shadow inside thumbnails (`object_fit` boxes have no fitted bounds to
   shadow).
+
+## 2026-10-13: On-device OCR for search and copy text
+
+`snapwright-ocr` wraps what each OS has: Apple Vision (accurate level, language correction),
+`Windows.Media.Ocr` (profile languages, English fallback) and, on Linux, ocrs (pure Rust,
+MIT/Apache). Nothing is sent anywhere.
+
+- ocrs models (`text-detection.rten`, `text-recognition.rten`, ~12 MB, trained on HierText,
+  CC BY-SA 4.0) are fetched on first use into the data folder (`ocr-models` beside
+  `library`) and pinned by BLAKE3; `SNAPWRIGHT_OCR_MODELS` points at a folder that already
+  has them (packagers, offline machines, CI). Bundling them would add 12 MB to every Linux
+  download for a feature that works a minute later anyway.
+- ocrs squeezes any image into its 800x600 detection input, which loses screenshot-sized text,
+  so Linux detects words per overlapping 800x600 tile and reads lines on the whole image.
+  Windows tiles the same way past `OcrEngine::MaxImageDimension`. Images under 0.24 MP (a
+  selection) are read at 2x; full screens at 1x, which reads about the same text in a third
+  of the time (1 to 1.5 s for 1600x1000 on four cores).
+- The library stores the text of the image it shows (the edit when there is one) and which
+  image that was (`ocr_hash`). An edit or revert makes the capture pending again, so blurring
+  a secret also takes it out of search. The column is added by a presence check rather than
+  a schema bump, so it does not collide with other branches' migrations.
+- One worker thread owns the engine and blocks on a channel (0% idle). Library changes wake
+  it; it waits for a quiet second, then reads pending captures newest first, which also
+  backfills an existing library. `T` in the overlay sends the selection to the same worker
+  ahead of the queue and puts the text on the clipboard.

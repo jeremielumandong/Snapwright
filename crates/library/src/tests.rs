@@ -329,6 +329,66 @@ fn edits_are_shown_in_place_of_the_original_and_can_be_reverted() {
 }
 
 #[test]
+fn recognised_text_is_searchable_and_follows_the_shown_image() {
+    let mut f = library();
+    let old = add(&mut f.lib, 1, [10, 20, 30], meta("Terminal", "zsh"));
+    let new = add(&mut f.lib, 2, [40, 50, 60], meta("Slack", "general"));
+    let trashed = add(&mut f.lib, 3, [70, 80, 90], meta("a", "b"));
+    f.lib.trash(trashed).unwrap();
+
+    // Newest first, trash left out, each pointing at its image.
+    let pending = f.lib.pending_text(10).unwrap();
+    assert_eq!(pending.iter().map(|j| j.id).collect::<Vec<_>>(), [new, old]);
+    assert!(pending.iter().all(|j| j.image.exists()));
+    assert_eq!(f.lib.pending_text(1).unwrap().len(), 1);
+
+    let job = &pending[0];
+    f.lib
+        .set_recognized_text(job.id, &job.hash, "Deploy failed: exit code 137")
+        .unwrap();
+    let search = |lib: &Library, text: &str| {
+        ids(&lib
+            .list(&Query {
+                text: Some(text.into()),
+                ..Query::default()
+            })
+            .unwrap())
+    };
+    assert_eq!(search(&f.lib, "exit 137"), [new]);
+    assert_eq!(f.lib.get(new).unwrap().text, "Deploy failed: exit code 137");
+    assert_eq!(ids_of(&f.lib.pending_text(10).unwrap()), [old]);
+
+    // Read but empty still counts as read.
+    let job = &f.lib.pending_text(10).unwrap()[0];
+    f.lib.set_recognized_text(job.id, &job.hash, "").unwrap();
+    assert!(f.lib.pending_text(10).unwrap().is_empty());
+
+    // An edit (say, a blurred secret) puts the capture back in line to be read again, and
+    // text read from an image that is no longer shown leaves it there.
+    edit(&mut f.lib, new, [1, 2, 3], "{}");
+    let job = f.lib.pending_text(10).unwrap().remove(0);
+    assert_eq!(job.id, new);
+    assert_eq!(job.hash, f.lib.get(new).unwrap().edit.unwrap().hash);
+    f.lib
+        .set_recognized_text(new, &f.lib.get(new).unwrap().hash, "stale")
+        .unwrap();
+    assert_eq!(ids_of(&f.lib.pending_text(10).unwrap()), [new]);
+    f.lib
+        .set_recognized_text(new, &job.hash, "Deploy failed")
+        .unwrap();
+    assert!(f.lib.pending_text(10).unwrap().is_empty());
+    assert!(search(&f.lib, "137").is_empty());
+    assert!(matches!(
+        f.lib.set_recognized_text(999, "x", "y"),
+        Err(Error::NotFound(999))
+    ));
+}
+
+fn ids_of(jobs: &[TextJob]) -> Vec<i64> {
+    jobs.iter().map(|j| j.id).collect()
+}
+
+#[test]
 fn purging_removes_edits_too() {
     let mut f = library();
     let id = add(&mut f.lib, 1, [10, 20, 30], meta("a", "b"));
