@@ -3,7 +3,8 @@
 //!
 //! The engine refuses images larger than `OcrEngine::MaxImageDimension` on either side, so a
 //! bigger capture is read in overlapping tiles and each line is kept from the tile that owns
-//! its centre. Small images are read at 2x, which helps with 1x UI text.
+//! its centre. Windows OCR misreads 1x UI text (l as t), so anything up to a 4K-class screen
+//! is read at 2x; tiling keeps that under the size limit.
 
 use windows::Globalization::Language;
 use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap};
@@ -17,6 +18,8 @@ use crate::{
 
 /// How far tiles overlap; a line of text is shorter than this in height.
 const OVERLAP: usize = 128;
+/// Images up to this long side are read at 2x.
+const UPSCALE_MAX_SIDE: u32 = 4096;
 
 pub struct Backend {
     engine: OcrEngine,
@@ -41,7 +44,7 @@ impl Backend {
     }
 
     pub fn recognize(&mut self, image: &Image<'_>) -> Result<Vec<Line>> {
-        let scale = if image.width.max(image.height) as usize * 2 <= self.max {
+        let scale = if image.width.max(image.height) <= UPSCALE_MAX_SIDE {
             2.0
         } else {
             1.0
