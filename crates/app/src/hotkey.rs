@@ -31,15 +31,6 @@ pub struct Registered {
     pub labels: Vec<(Action, String)>,
 }
 
-impl Registered {
-    pub fn label(&self, action: Action) -> Option<&str> {
-        self.labels
-            .iter()
-            .find(|(a, _)| *a == action)
-            .map(|(_, l)| l.as_str())
-    }
-}
-
 impl gpui_kit::Global for Registered {}
 
 /// Registers the hotkeys. Each press arrives on the returned stream with the instant the OS
