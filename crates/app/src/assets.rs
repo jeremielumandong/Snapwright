@@ -20,14 +20,18 @@ gpui_kit::assets::icon_assets!(
         Monitor,
         MousePointer2,
         MoveUpRight,
+        Pause,
         Pencil,
+        Play,
         Repeat2,
         Scan,
         Slash,
+        Square,
         SquareDashed,
         Timer,
         Trash,
         Type,
+        Video,
         X,
     ]
 );
