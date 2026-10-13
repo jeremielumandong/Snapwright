@@ -1,6 +1,7 @@
 //! macOS engine: Vision's `VNRecognizeTextRequest` at the accurate level, with language
 //! correction, over a `CGImage` that wraps the pixels as they are (BGRA or RGBA, no copy into
-//! another layout). Vision reads any size and runs on the Neural Engine where there is one.
+//! another layout). Big images are read in overlapping tiles (see [`TILE`]), each line kept
+//! from the tile that owns its centre.
 
 use objc2::AllocAnyThread as _;
 use objc2::rc::autoreleasepool;
@@ -14,10 +15,14 @@ use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel,
 };
 
-use crate::{Bounds, Config, Error, Image, Line, Order, Result, reading_order};
+use crate::{Bounds, Config, Error, Image, Line, Order, Result, reading_order, spans};
 
 /// Smallest text, in pixels, Vision is asked to read.
 const MIN_TEXT_PX: f32 = 8.0;
+/// Tile size and overlap. Vision reads a whole screen at a reduced resolution and garbles
+/// small UI text there, but reads the same text cleanly in a crop of about this size.
+const TILE: usize = 1024;
+const OVERLAP: usize = 128;
 
 pub struct Backend;
 
@@ -27,11 +32,41 @@ impl Backend {
     }
 
     pub fn recognize(&mut self, image: &Image<'_>) -> Result<Vec<Line>> {
-        autoreleasepool(|_| recognize(image))
+        let (width, height) = (image.width as usize, image.height as usize);
+        let mut lines = Vec::new();
+        for xs in spans(width, TILE, OVERLAP) {
+            for ys in spans(height, TILE, OVERLAP) {
+                let (tw, th) = (xs.end - xs.start, ys.end - ys.start);
+                let mut pixels = Vec::with_capacity(tw * th * 4);
+                for y in ys.start..ys.end {
+                    let row = (y * width + xs.start) * 4;
+                    pixels.extend_from_slice(&image.pixels[row..row + tw * 4]);
+                }
+                let tile = Image {
+                    pixels: &pixels,
+                    width: tw as u32,
+                    height: th as u32,
+                    order: image.order,
+                };
+                for mut line in autoreleasepool(|_| read(&tile))? {
+                    let b = &mut line.bounds;
+                    let cx = xs.start + (b.x + b.width / 2) as usize;
+                    let cy = ys.start + (b.y + b.height / 2) as usize;
+                    if xs.own.contains(&cx) && ys.own.contains(&cy) {
+                        b.x += xs.start as u32;
+                        b.y += ys.start as u32;
+                        lines.push(line);
+                    }
+                }
+            }
+        }
+        reading_order(&mut lines);
+        Ok(lines)
     }
 }
 
-fn recognize(image: &Image<'_>) -> Result<Vec<Line>> {
+/// The lines in one image, with boxes in its pixels.
+fn read(image: &Image<'_>) -> Result<Vec<Line>> {
     let platform = |api: &'static str, message: String| Error::Platform { api, message };
     let (w, h) = (image.width as usize, image.height as usize);
     let data = CFData::from_bytes(image.pixels);
@@ -105,6 +140,5 @@ fn recognize(image: &Image<'_>) -> Result<Vec<Line>> {
             },
         });
     }
-    reading_order(&mut lines);
     Ok(lines)
 }
