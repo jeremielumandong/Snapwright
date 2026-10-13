@@ -75,6 +75,15 @@ Gate: the team uses it daily with no capture lost in two weeks.
 Gate: 1,000 beta users and 99.5% crash-free sessions.
 
 - [ ] Wayland: `ext-image-copy-capture-v1` / `wlr-screencopy`, portal ScreenCast fallback.
+      Note: `wlr-screencopy` done (Hyprland, Sway…), with layer-shell overlay, Hyprland window
+      list and a single-instance socket for compositor keybindings (see DECISIONS).
+      `ext-image-copy-capture` and the portal (GNOME, KDE) remain.
+- [x] UI refresh from the design handoff (`docs/design/`): Geist, light/dark tokens mapped
+      onto gpui-component (`theme.rs`), 32 px controls.
+      Note: library has a brand sidebar with tag list and hotkey card, search with a Capture
+      split button (region, 3 s delay, repeat), a day-grouped grid and a slimmer inspector;
+      the editor has a tool rail with shortcuts, a floating colour/size bar and keycap hints;
+      overlay, loupe, preview and countdown share one dark HUD material with keycap hints.
 - [ ] OCR index (Vision, Windows.Media.Ocr, `ocrs`); collections; pin to screen.
 - [ ] Scrolling capture; smart redaction; beautifier; export formats; HDR tone mapping.
 
@@ -107,3 +116,13 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Linux: the overlay waits 120 ms for an open preview to leave the screen (about 200 ms vs
   70 ms under Xvfb). Measure real compositors and shorten `toast::SETTLE`, or keep the preview
   hidden from the grab another way.
+
+- Wayland: support rotated/flipped outputs in screencopy (refused today, untested).
+- Wayland: window lists for Sway (`swaymsg -t get_tree`) and niri, so snapping works there.
+- Wayland: the e2e and latency scripts are X11-only; a headless Sway run would cover Wayland.
+- Overlay: drag handles on an adjusted selection (the design draws eight; today it resizes
+  with Shift+arrows only, so no handles are drawn).
+- Library: a "Capture" from the library minimizes the window first where the OS does not
+  exclude our windows; check that this feels right on X11 and Windows.
+- UI: light mode was checked against the design only through code; screenshot it on a light
+  desktop.

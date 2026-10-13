@@ -8,11 +8,14 @@ mod assets;
 mod countdown;
 mod editor_view;
 mod hotkey;
+#[cfg(target_os = "linux")]
+mod instance;
 mod library_view;
 mod output;
 mod overlay;
 mod selection;
 mod session;
+mod theme;
 mod toast;
 mod tray;
 
@@ -22,8 +25,25 @@ use anyhow::Result;
 use futures::StreamExt as _;
 use tracing_subscriber::EnvFilter;
 
-/// `--capture-now` starts a capture as soon as the app is up (for tests and timing runs).
+#[cfg(target_os = "linux")]
+use instance::Request;
+
+/// What a launch asks for (on Linux, also what a later launch hands to the running app).
+#[cfg(not(target_os = "linux"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Request {
+    Capture,
+    RepeatLast,
+    CaptureIn(u32),
+    Library,
+    EditLatest,
+}
+
+/// `--capture-now` starts a capture as soon as the app is up, or in the running app (bind it
+/// to a key in a Wayland compositor).
 const CAPTURE_NOW_ARG: &str = "--capture-now";
+/// `--repeat-last` captures the last region again.
+const REPEAT_LAST_ARG: &str = "--repeat-last";
 /// `--library` opens the library window at launch.
 const LIBRARY_ARG: &str = "--library";
 /// `--edit-latest` opens the newest capture in the editor (for tests).
@@ -39,24 +59,50 @@ fn main() -> Result<()> {
             EnvFilter::try_from_env("SNAPWRIGHT_LOG").unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
-    let capture_now = std::env::args().any(|a| a == CAPTURE_NOW_ARG);
-    let show_library = std::env::args().any(|a| a == LIBRARY_ARG);
-    let edit_latest = std::env::args().any(|a| a == EDIT_LATEST_ARG);
-    let capture_in = std::env::args().find_map(|a| {
-        a.strip_prefix(CAPTURE_IN_ARG)
-            .and_then(|n| n.parse::<u32>().ok())
-    });
+    let requests = requests(std::env::args());
+    #[cfg(target_os = "linux")]
+    if instance::forward(&requests) {
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    let later_launches = match instance::listen() {
+        Ok(rx) => Some(rx),
+        Err(e) => {
+            tracing::warn!(error = %e, "single-instance socket unavailable");
+            None
+        }
+    };
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            theme::init(cx);
             if let Err(e) = session::init(cx) {
                 tracing::error!(error = %e, "screen capture is unavailable");
                 cx.quit();
                 return;
             }
-            let labels = match hotkey::register() {
+            #[cfg(target_os = "linux")]
+            if let Some(mut launches) = later_launches {
+                cx.spawn(async move |cx| {
+                    while let Some((request, at)) = launches.next().await {
+                        cx.update(|cx| handle(request, at, cx));
+                    }
+                })
+                .detach();
+            }
+            let hotkeys = if snapwright_capture::wayland_session() {
+                // X11 key grabs under XWayland only fire while an X window has focus.
+                tracing::info!(
+                    "no global hotkeys on Wayland; bind `snapwright-app --capture-now` \
+                     (and `--repeat-last`) to keys in your compositor"
+                );
+                Err(anyhow::anyhow!("Wayland session"))
+            } else {
+                hotkey::register()
+            };
+            let labels = match hotkeys {
                 Ok((hotkeys, mut presses)) => {
                     for (action, label) in &hotkeys.labels {
                         tracing::info!(hotkey = %label, ?action, "hotkey registered");
@@ -94,20 +140,48 @@ fn main() -> Result<()> {
                 }
                 Err(e) => tracing::warn!(error = %e, "tray icon unavailable"),
             }
-            if capture_now {
-                session::start(Instant::now(), cx);
-            }
-            if show_library {
-                library_view::open(cx);
-            }
-            if let Some(seconds) = capture_in {
-                countdown::start(seconds, cx);
-            }
-            if edit_latest {
-                library_view::edit_latest(cx);
+            let now = Instant::now();
+            for request in &requests {
+                handle(*request, now, cx);
             }
         });
     Ok(())
+}
+
+/// What the command line asks for, in the order the app does it.
+fn requests(args: impl Iterator<Item = String>) -> Vec<Request> {
+    let args: Vec<String> = args.collect();
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    let mut out = Vec::new();
+    if has(CAPTURE_NOW_ARG) {
+        out.push(Request::Capture);
+    }
+    if has(REPEAT_LAST_ARG) {
+        out.push(Request::RepeatLast);
+    }
+    if has(LIBRARY_ARG) {
+        out.push(Request::Library);
+    }
+    if let Some(n) = args.iter().find_map(|a| {
+        a.strip_prefix(CAPTURE_IN_ARG)
+            .and_then(|n| n.parse::<u32>().ok())
+    }) {
+        out.push(Request::CaptureIn(n));
+    }
+    if has(EDIT_LATEST_ARG) {
+        out.push(Request::EditLatest);
+    }
+    out
+}
+
+fn handle(request: Request, at: Instant, cx: &mut gpui_kit::App) {
+    match request {
+        Request::Capture => session::start(at, cx),
+        Request::RepeatLast => session::repeat_last(at, cx),
+        Request::CaptureIn(seconds) => countdown::start(seconds, cx),
+        Request::Library => library_view::open(cx),
+        Request::EditLatest => library_view::edit_latest(cx),
+    }
 }
 
 fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {

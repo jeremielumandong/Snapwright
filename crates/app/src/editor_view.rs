@@ -9,16 +9,16 @@ use std::sync::{Arc, Mutex};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
-};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{Disableable as _, Icon};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, CursorStyle, FocusHandle, Global,
-    ImageSource, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Render, RenderImage, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, div, hsla, img, point, px, size,
+    AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context, CursorStyle, Div,
+    FocusHandle, FontWeight, Global, ImageSource, InteractiveElement as _, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
+    Pixels, Render, RenderImage, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions, div, hsla, img, point, px,
+    size,
 };
 use snapwright_editor::{
     Color, History, Image, Kind, Point, Rect, Renderer, Scene, Shape, render as render_scene,
@@ -26,13 +26,18 @@ use snapwright_editor::{
 use snapwright_library::{EditedImage, Library};
 
 use crate::session::{self, LibraryService};
+use crate::theme::{self, Palette};
 use crate::{library_view, output};
 
-const TOOLBAR_H: f32 = 52.;
-const STATUS_H: f32 = 28.;
-const PAD: f32 = 16.;
-/// Stroke widths offered, in image pixels.
-const WIDTHS: [(f32, &str); 3] = [(2., "Thin"), (4., "Medium"), (8., "Thick")];
+const HEADER_H: f32 = 52.;
+const RAIL_W: f32 = 56.;
+const STATUS_H: f32 = 30.;
+/// Space around the image on the canvas.
+const PAD: f32 = 32.;
+/// Space above the image for the floating style bar.
+const BAR_SPACE: f32 = 66.;
+/// Stroke widths offered, in image pixels, with their size-picker letters.
+const WIDTHS: [(f32, &str, &str); 3] = [(2., "S", "Thin"), (4., "M", "Medium"), (8., "L", "Thick")];
 /// How far from a shape a click still picks it, in screen pixels.
 const PICK: f32 = 5.;
 
@@ -52,19 +57,33 @@ enum Tool {
 }
 
 impl Tool {
+    /// In rail order, grouped by purpose: select; shapes; text and marks; redaction; crop.
     const ALL: [Tool; 11] = [
         Tool::Select,
         Tool::Arrow,
         Tool::Line,
         Tool::Rectangle,
         Tool::Ellipse,
-        Tool::Highlight,
         Tool::Text,
         Tool::Step,
+        Tool::Highlight,
         Tool::Blur,
         Tool::Pixelate,
         Tool::Crop,
     ];
+
+    /// Whether this tool starts a new group in the rail.
+    fn starts_group(self) -> bool {
+        matches!(self, Tool::Arrow | Tool::Text | Tool::Blur | Tool::Crop)
+    }
+
+    /// Whether what this tool draws takes a colour and a size.
+    fn is_styled(self) -> bool {
+        !matches!(
+            self,
+            Tool::Select | Tool::Blur | Tool::Pixelate | Tool::Crop
+        )
+    }
 
     fn name(self) -> &'static str {
         match self {
@@ -115,16 +134,26 @@ impl Tool {
         }
     }
 
-    fn hint(self) -> &'static str {
+    /// What to do with this tool, then keys and what they do.
+    fn hint(self) -> (&'static str, &'static [(&'static str, &'static str)]) {
         match self {
-            Tool::Select => "Click a shape to select it, drag to move it, Delete removes it",
-            Tool::Arrow | Tool::Line => "Drag to draw; hold Shift for 45° angles",
-            Tool::Rectangle | Tool::Ellipse => "Drag to draw; hold Shift for a square or circle",
-            Tool::Highlight => "Drag over text to highlight it",
-            Tool::Text => "Click to type; Enter finishes, Shift+Enter starts a new line",
-            Tool::Step => "Click to place the next numbered step",
-            Tool::Blur | Tool::Pixelate => "Drag over anything private to hide it",
-            Tool::Crop => "Drag the area to keep; pick another tool to see the result",
+            Tool::Select => (
+                "Click a shape to select it, drag to move it",
+                &[("backspace", "remove"), ("left", "nudge")],
+            ),
+            Tool::Arrow | Tool::Line => ("Drag to draw", &[("shift", "45° angles")]),
+            Tool::Rectangle | Tool::Ellipse => ("Drag to draw", &[("shift", "square or circle")]),
+            Tool::Highlight => ("Drag over text to highlight it", &[]),
+            Tool::Text => (
+                "Click to type",
+                &[("enter", "finish"), ("shift+enter", "new line")],
+            ),
+            Tool::Step => ("Click to place the next numbered step", &[]),
+            Tool::Blur | Tool::Pixelate => ("Drag over anything private to hide it", &[]),
+            Tool::Crop => (
+                "Drag the area to keep; pick another tool to see the result",
+                &[],
+            ),
         }
     }
 
@@ -205,18 +234,40 @@ pub fn open(id: i64, cx: &mut App) {
             }),
             None => Scene::default(),
         };
-        anyhow::Ok((Image::new(w, h, rgba)?, scene))
+        let names = Names {
+            title: library_view::title(&capture),
+            app: capture.meta.app.clone(),
+        };
+        anyhow::Ok((Image::new(w, h, rgba)?, scene, names))
     });
     cx.spawn(async move |cx| match load.await {
-        Ok((image, scene)) => cx.update(|cx| open_window(id, library, image, scene, cx)),
+        Ok((image, scene, names)) => {
+            cx.update(|cx| open_window(id, library, image, scene, names, cx))
+        }
         Err(e) => tracing::error!(id, error = %e, "could not open the capture for editing"),
     })
     .detach();
 }
 
-fn open_window(id: i64, library: Arc<Mutex<Library>>, image: Image, scene: Scene, cx: &mut App) {
+/// The capture's title and app, for the editor's header.
+struct Names {
+    title: String,
+    app: String,
+}
+
+fn open_window(
+    id: i64,
+    library: Arc<Mutex<Library>>,
+    image: Image,
+    scene: Scene,
+    names: Names,
+    cx: &mut App,
+) {
     let (iw, ih) = (image.width as f32, image.height as f32);
-    let (mut w, mut h) = (iw + 2. * PAD, ih + TOOLBAR_H + STATUS_H + 2. * PAD);
+    let (mut w, mut h) = (
+        iw + RAIL_W + 2. * PAD,
+        ih + HEADER_H + STATUS_H + BAR_SPACE + PAD,
+    );
     if let Some(d) = cx.primary_display() {
         let b = d.bounds().size;
         w = w.min(f32::from(b.width) * 0.9);
@@ -234,7 +285,7 @@ fn open_window(id: i64, library: Arc<Mutex<Library>>, image: Image, scene: Scene
         ..Default::default()
     };
     match gpui_kit::open_window(options, cx, |window, cx| {
-        cx.new(|cx| EditorView::new(id, library, image, scene, window, cx))
+        cx.new(|cx| EditorView::new(id, library, image, scene, names, window, cx))
     }) {
         Ok((handle, _)) => cx.default_global::<EditorWindows>().0.push((id, handle)),
         Err(e) => tracing::error!(error = %e, "could not open the editor window"),
@@ -267,6 +318,7 @@ struct Typing {
 
 pub struct EditorView {
     id: i64,
+    names: Names,
     library: Arc<Mutex<Library>>,
     renderer: Arc<Mutex<Renderer>>,
     width: u32,
@@ -288,6 +340,7 @@ pub struct EditorView {
     status: SharedString,
     focus: FocusHandle,
     _release: Subscription,
+    _appearance: Subscription,
 }
 
 impl EditorView {
@@ -296,6 +349,7 @@ impl EditorView {
         library: Arc<Mutex<Library>>,
         image: Image,
         scene: Scene,
+        names: Names,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -312,8 +366,11 @@ impl EditorView {
                 .0
                 .retain(|(i, _)| *i != id);
         });
+        let appearance =
+            cx.observe_window_appearance(window, |_, window, cx| theme::sync(window, cx));
         let mut view = Self {
             id,
+            names,
             library,
             width: image.width,
             height: image.height,
@@ -333,6 +390,7 @@ impl EditorView {
             status: SharedString::default(),
             focus,
             _release: release,
+            _appearance: appearance,
         };
         view.refresh(window, cx);
         view
@@ -409,8 +467,8 @@ impl EditorView {
             .as_ref()
             .map_or_else(|| self.crop_region(self.tool != Tool::Crop), |(_, r)| *r);
         let vp = window.viewport_size();
-        let aw = (f32::from(vp.width) - 2. * PAD).max(1.);
-        let ah = (f32::from(vp.height) - TOOLBAR_H - STATUS_H - 2. * PAD).max(1.);
+        let aw = (f32::from(vp.width) - RAIL_W - 2. * PAD).max(1.);
+        let ah = (f32::from(vp.height) - HEADER_H - STATUS_H - BAR_SPACE - PAD).max(1.);
         let sf = window.scale_factor();
         let mut scale = (aw / shown.w).min(ah / shown.h).min(1. / sf);
         if scale * sf > 0.98 {
@@ -419,8 +477,8 @@ impl EditorView {
         }
         // On whole device pixels: a half-pixel offset would blur a 1:1 preview.
         let snap = |v: f32| (v * sf).round() / sf;
-        let x = snap(PAD + (aw - shown.w * scale) / 2.);
-        let y = snap(TOOLBAR_H + PAD + (ah - shown.h * scale) / 2.);
+        let x = snap(RAIL_W + PAD + (aw - shown.w * scale) / 2.);
+        let y = snap(HEADER_H + BAR_SPACE + (ah - shown.h * scale) / 2.);
         (point(px(x), px(y)), scale, shown)
     }
 
@@ -731,7 +789,7 @@ impl EditorView {
             "[" | "]" => {
                 let at = WIDTHS
                     .iter()
-                    .position(|(w, _)| *w == self.stroke)
+                    .position(|(w, _, _)| *w == self.stroke)
                     .unwrap_or(1);
                 let next = if key == "[" {
                     at.saturating_sub(1)
@@ -855,116 +913,113 @@ impl EditorView {
 
     // ------------------------------------------------------------------ view
 
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let mut tools = div().flex().items_center().gap(px(2.));
-        for tool in Tool::ALL {
-            tools = tools.child(
-                Button::new(tool.name())
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(tool.icon()))
-                    .selected(self.tool == tool)
-                    .tooltip(format!("{} ({})", tool.name(), tool.key().to_uppercase()))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_tool(tool, window, cx);
-                    })),
-            );
-        }
-        let mut colors = div().flex().items_center().gap(px(6.));
-        for (i, c) in Color::PRESETS.into_iter().enumerate() {
-            let selected = c == self.color;
-            colors = colors.child(
-                div()
-                    .id(("color", i))
-                    .size(px(20.))
-                    .rounded_full()
-                    .cursor_pointer()
-                    .bg(gpui_kit::rgb(
-                        (u32::from(c.r) << 16) | (u32::from(c.g) << 8) | u32::from(c.b),
-                    ))
-                    .border_2()
-                    .border_color(if selected {
-                        theme.foreground
-                    } else {
-                        theme.border
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_color(c, window, cx);
-                    })),
-            );
-        }
-        let mut widths = div().flex().items_center().gap(px(2.));
-        for (i, (w, name)) in WIDTHS.into_iter().enumerate() {
-            widths = widths.child(
-                Button::new(("width", i))
-                    .ghost()
-                    .small()
-                    .selected(self.stroke == w)
-                    .tooltip(format!("{name} ([ and ] to change)"))
-                    .child(
-                        div()
-                            .w(px(16.))
-                            .h(px(w.min(8.)))
-                            .rounded_full()
-                            .bg(theme.foreground),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_stroke(w, window, cx);
-                    })),
-            );
-        }
-        let sep = || div().w(px(1.)).h(px(24.)).bg(theme.border);
+    fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let unsaved = self.scene != self.saved;
+        let status = if unsaved {
+            Some((SharedString::from("Unsaved"), p.warning))
+        } else if !self.status.is_empty() {
+            Some((self.status.clone(), p.success))
+        } else {
+            None
+        };
+        let icon_button = |id: &'static str, icon: IconName, tip: &'static str, enabled: bool| {
+            Button::new(id)
+                .ghost()
+                .icon(Icon::new(icon))
+                .tooltip(tip)
+                .disabled(!enabled)
+        };
+        let undo_tip = format!("Undo ({}Z)", theme::key_label("secondary"));
+        let redo_tip = format!(
+            "Redo ({}{}Z)",
+            theme::key_label("shift"),
+            theme::key_label("secondary")
+        );
         div()
-            .h(px(TOOLBAR_H))
-            .w_full()
+            .h(px(HEADER_H))
+            .flex_none()
             .flex()
             .items_center()
             .gap(px(12.))
-            .px(px(12.))
+            .pl(px(16.))
+            .pr(px(12.))
             .border_b_1()
-            .border_color(theme.border)
-            .bg(theme.background)
-            .child(tools)
-            .child(sep())
-            .child(colors)
-            .child(sep())
-            .child(widths)
-            .child(sep())
+            .border_color(p.line)
+            .bg(p.bg)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(self.names.title.clone()),
+                    )
+                    .when(
+                        !self.names.app.is_empty() && self.names.app != self.names.title,
+                        |d| {
+                            d.child(
+                                div()
+                                    .flex_none()
+                                    .text_color(p.fg3)
+                                    .child(self.names.app.clone()),
+                            )
+                        },
+                    )
+                    .when_some(status, |d, (label, dot)| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .gap(px(5.))
+                                .px(px(8.))
+                                .rounded(px(10.))
+                                .bg(p.hover)
+                                .text_color(p.fg2)
+                                .text_size(px(11.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(div().size(px(6.)).rounded_full().bg(dot))
+                                .child(label),
+                        )
+                    }),
+            )
             .child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(px(2.))
                     .child(
-                        Button::new("undo")
-                            .ghost()
-                            .small()
-                            .icon(Icon::new(IconName::Undo2))
-                            .tooltip("Undo")
-                            .disabled(!self.history.can_undo())
+                        icon_button("undo", IconName::Undo2, "Undo", self.history.can_undo())
+                            .tooltip(undo_tip)
                             .on_click(cx.listener(|this, _, window, cx| this.undo(window, cx))),
                     )
                     .child(
-                        Button::new("redo")
-                            .ghost()
-                            .small()
-                            .icon(Icon::new(IconName::Redo2))
-                            .tooltip("Redo")
-                            .disabled(!self.history.can_redo())
+                        icon_button("redo", IconName::Redo2, "Redo", self.history.can_redo())
+                            .tooltip(redo_tip)
                             .on_click(cx.listener(|this, _, window, cx| this.redo(window, cx))),
                     ),
             )
-            .child(div().flex_1())
+            .child(div().w(px(1.)).h(px(20.)).bg(p.line))
             .child(
                 Button::new("copy")
-                    .small()
+                    .outline()
+                    .icon(Icon::new(IconName::Copy))
                     .label("Copy")
                     .on_click(cx.listener(|this, _, _, cx| this.copy(cx))),
             )
             .child(
                 Button::new("done")
                     .primary()
-                    .small()
+                    .icon(Icon::new(IconName::Check))
                     .label("Done")
                     .tooltip("Save, copy and close")
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -972,6 +1027,235 @@ impl EditorView {
                         window.remove_window();
                     })),
             )
+    }
+
+    /// The tools, top to bottom, each with its shortcut letter.
+    fn render_rail(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut rail = div()
+            .id("rail")
+            .overflow_y_scroll()
+            .w(px(RAIL_W))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(2.))
+            .py(px(10.))
+            .bg(p.panel)
+            .border_r_1()
+            .border_color(p.line);
+        for tool in Tool::ALL {
+            let on = self.tool == tool;
+            if tool.starts_group() {
+                rail = rail.child(
+                    div()
+                        .w(px(24.))
+                        .h(px(1.))
+                        .flex_none()
+                        .my(px(6.))
+                        .bg(p.line2),
+                );
+            }
+            rail = rail.child(
+                div()
+                    .id(tool.name())
+                    .relative()
+                    .w(px(38.))
+                    .h(px(36.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(p.accent_soft).text_color(p.accent))
+                    .when(!on, |d| d.text_color(p.fg2).hover(|d| d.bg(p.hover)))
+                    .tooltip({
+                        let tip: SharedString =
+                            format!("{} ({})", tool.name(), tool.key().to_uppercase()).into();
+                        move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                    })
+                    .child(Icon::new(tool.icon()).size(px(17.)))
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(3.))
+                            .bottom(px(2.))
+                            .text_size(px(8.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.fg3)
+                            .opacity(if on { 1. } else { 0.7 })
+                            .child(tool.key().to_uppercase()),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_tool(tool, window, cx);
+                    })),
+            );
+        }
+        rail
+    }
+
+    /// Colour and size for the active tool (or the selected shape), floating over the canvas.
+    fn render_style_bar(&self, p: &Palette, cx: &mut Context<Self>) -> Option<Div> {
+        let selected = self.selected.and_then(|i| self.scene.shapes.get(i));
+        if !self.tool.is_styled() && selected.is_none() {
+            return None;
+        }
+        let label = if self.tool == Tool::Select {
+            "Selection"
+        } else {
+            self.tool.name()
+        };
+        let mut colors = div().flex().gap(px(4.));
+        for (i, c) in Color::PRESETS.into_iter().enumerate() {
+            let on = c == self.color;
+            colors = colors.child(
+                div()
+                    .id(("color", i))
+                    .size(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .when(on, |d| d.border_2().border_color(p.fg))
+                    .tooltip({
+                        let tip: SharedString = format!("Colour {}", i + 1).into();
+                        move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                    })
+                    .child(
+                        div()
+                            .size(px(16.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(hsla(0., 0., 0., 0.14))
+                            .bg(gpui_kit::rgb(
+                                (u32::from(c.r) << 16) | (u32::from(c.g) << 8) | u32::from(c.b),
+                            )),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_color(c, window, cx);
+                    })),
+            );
+        }
+        let mut sizes = div()
+            .flex()
+            .gap(px(2.))
+            .p(px(2.))
+            .rounded(px(7.))
+            .bg(p.hover);
+        for (i, (w, letter, name)) in WIDTHS.into_iter().enumerate() {
+            let on = self.stroke == w;
+            sizes = sizes.child(
+                div()
+                    .id(("width", i))
+                    .w(px(30.))
+                    .h(px(24.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(5.))
+                    .cursor_pointer()
+                    .text_size(px(11. + 2. * i as f32))
+                    .font_weight(if on {
+                        FontWeight::SEMIBOLD
+                    } else {
+                        FontWeight::MEDIUM
+                    })
+                    .when(on, |d| {
+                        d.bg(p.bg).shadow(vec![BoxShadow {
+                            color: hsla(0., 0., 0., 0.12),
+                            offset: point(px(0.), px(1.)),
+                            blur_radius: px(2.),
+                            spread_radius: px(0.),
+                            inset: false,
+                        }])
+                    })
+                    .when(!on, |d| d.text_color(p.fg2))
+                    .tooltip({
+                        let tip: SharedString = format!("{name} ([ and ] to change)").into();
+                        move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                    })
+                    .child(letter)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_stroke(w, window, cx);
+                    })),
+            );
+        }
+        let sep = || div().w(px(1.)).h(px(18.)).bg(p.line);
+        Some(
+            div()
+                .h(px(40.))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .pl(px(12.))
+                .pr(px(6.))
+                .rounded(px(10.))
+                .bg(p.bg)
+                .border_1()
+                .border_color(p.line)
+                .shadow(vec![BoxShadow {
+                    color: hsla(0., 0., 0., 0.08),
+                    offset: point(px(0.), px(4.)),
+                    blur_radius: px(14.),
+                    spread_radius: px(0.),
+                    inset: false,
+                }])
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(p.fg2)
+                        .child(label),
+                )
+                .child(sep())
+                .child(colors)
+                .child(sep())
+                .child(sizes),
+        )
+    }
+
+    fn render_footer(&self, p: &Palette, scale: f32, window: &Window) -> impl IntoElement {
+        let (lead, keys) = self.tool.hint();
+        let mut hint = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(lead);
+        for (key, what) in keys {
+            let caps: String = key.split('+').map(theme::key_label).collect();
+            hint = hint
+                .child(div().text_color(p.fg3).child("·"))
+                .child(theme::key_hint(caps, p).text_color(p.fg2))
+                .child(*what);
+        }
+        let (out_w, out_h) = self.scene.output_size(self.width, self.height);
+        let zoom = (scale * window.scale_factor() * 100.).round();
+        div()
+            .h(px(STATUS_H))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .px(px(16.))
+            .border_t_1()
+            .border_color(p.line)
+            .bg(p.bg)
+            .text_size(px(12.))
+            .text_color(p.fg2)
+            .child(hint)
+            .child(
+                div()
+                    .text_color(p.fg3)
+                    .child(format!("{out_w} × {out_h} px")),
+            )
+            .child(div().text_color(p.fg3).child(format!("{zoom}%")))
     }
 }
 
@@ -983,15 +1267,15 @@ fn text_size(width: f32) -> f32 {
 impl Render for EditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (origin, scale, shown) = self.layout(window);
-        let toolbar = self.render_toolbar(cx).into_any_element();
-        let theme = cx.theme();
+        let p = theme::palette(cx);
+        let vp = window.viewport_size();
         let canvas = div()
             .absolute()
-            .left_0()
-            .top(px(TOOLBAR_H))
-            .w_full()
-            .h(window.viewport_size().height - px(TOOLBAR_H + STATUS_H))
-            .bg(theme.muted)
+            .left(px(RAIL_W))
+            .top(px(HEADER_H))
+            .w(vp.width - px(RAIL_W))
+            .h(vp.height - px(HEADER_H + STATUS_H))
+            .bg(p.canvas)
             .cursor(match self.tool {
                 Tool::Select => CursorStyle::Arrow,
                 Tool::Text => CursorStyle::IBeam,
@@ -1005,10 +1289,25 @@ impl Render for EditorView {
                     .left(origin.x)
                     .top(origin.y)
                     .w(px(shown.w * scale))
-                    .h(px(shown.h * scale)),
+                    .h(px(shown.h * scale))
+                    .shadow(vec![
+                        BoxShadow {
+                            color: hsla(0., 0., 0., 0.06),
+                            offset: point(px(0.), px(0.)),
+                            blur_radius: px(0.),
+                            spread_radius: px(1.),
+                            inset: false,
+                        },
+                        BoxShadow {
+                            color: hsla(0., 0., 0., 0.16),
+                            offset: point(px(0.), px(8.)),
+                            blur_radius: px(30.),
+                            spread_radius: px(0.),
+                            inset: false,
+                        },
+                    ]),
             );
         }
-        let accent = hsla(0.58, 0.9, 0.55, 1.);
         if let Some(shape) = self.selected.and_then(|i| self.scene.shapes.get(i)) {
             let (x, y, w, h) = self.to_window(shape.bounds().inflate(2. / scale), window);
             layer = layer.child(
@@ -1019,7 +1318,7 @@ impl Render for EditorView {
                     .w(w)
                     .h(h)
                     .border_1()
-                    .border_color(accent)
+                    .border_color(p.accent)
                     .when(self.typing.is_some(), |d| d.border_2()),
             );
         }
@@ -1046,15 +1345,30 @@ impl Render for EditorView {
                         .border_color(hsla(0., 0., 1., 0.95)),
                 );
         }
-        let (out_w, out_h) = self.scene.output_size(self.width, self.height);
-        let unsaved = self.scene != self.saved;
+        // Clicks on the chrome must not draw on the canvas below.
+        let chrome = |d: Div| d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        let style_bar = self.render_style_bar(&p, cx).map(|bar| {
+            chrome(
+                div()
+                    .absolute()
+                    .top(px(HEADER_H + 14.))
+                    .left(px(RAIL_W))
+                    .w(vp.width - px(RAIL_W))
+                    .flex()
+                    .justify_center()
+                    .child(bar),
+            )
+        });
+        let header = self.render_header(&p, cx).into_any_element();
+        let rail = self.render_rail(&p, cx).into_any_element();
         div()
             .id("editor")
             .size_full()
             .relative()
             .track_focus(&self.focus)
-            .bg(theme.background)
-            .text_color(theme.foreground)
+            .bg(p.bg)
+            .text_color(p.fg)
+            .text_size(px(13.))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -1062,40 +1376,26 @@ impl Render for EditorView {
             .child(canvas)
             // Positions in the layer are window positions, as `layout` computes them.
             .child(layer)
-            .child(
+            .children(style_bar)
+            .child(chrome(
+                div().absolute().top_0().left_0().w_full().child(header),
+            ))
+            .child(chrome(
                 div()
                     .absolute()
-                    .top_0()
                     .left_0()
-                    .w_full()
-                    // Clicks on the toolbar must not draw on the canvas below.
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(toolbar),
-            )
-            .child(
+                    .top(px(HEADER_H))
+                    .h(vp.height - px(HEADER_H + STATUS_H))
+                    .child(rail),
+            ))
+            .child(chrome(
                 div()
                     .absolute()
                     .bottom_0()
                     .left_0()
                     .w_full()
-                    .h(px(STATUS_H))
-                    .flex()
-                    .items_center()
-                    .gap(px(16.))
-                    .px(px(12.))
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .bg(theme.background)
-                    .text_size(px(12.))
-                    .text_color(theme.muted_foreground)
-                    .child(div().flex_1().truncate().child(self.tool.hint()))
-                    .child(format!("{out_w} × {out_h} px"))
-                    .child(if unsaved {
-                        SharedString::from("Unsaved changes")
-                    } else {
-                        self.status.clone()
-                    }),
-            )
+                    .child(self.render_footer(&p, scale, window)),
+            ))
     }
 }
 
@@ -1124,5 +1424,6 @@ mod tests {
         keys.dedup();
         assert_eq!(keys.len(), Tool::ALL.len());
         assert_eq!(text_size(WIDTHS[1].0), 28.);
+        assert!(Tool::ALL[0] == Tool::Select && !Tool::Select.starts_group());
     }
 }
