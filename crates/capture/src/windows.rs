@@ -4,6 +4,8 @@
 //! a repeat capture is one GPU copy and one map. When the desktop has not changed since the
 //! last capture, the duplication has no new frame and the last one is returned as is.
 
+use std::time::{Duration, Instant};
+
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
 use windows::Win32::Graphics::Direct3D11::{
@@ -230,44 +232,61 @@ impl Output {
                 message: "no duplication".into(),
             });
         };
-        let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
-        let mut resource: Option<IDXGIResource> = None;
-        // A fresh duplication delivers the whole desktop as its first frame; later calls only
+        // A fresh duplication delivers the whole desktop as its first image; later calls only
         // return when something changed, so they do not wait.
-        let timeout = if first || self.staging.is_none() {
-            500
-        } else {
-            0
-        };
-        // SAFETY: out-pointers are valid locals; the frame is released below on every path.
-        match unsafe { dup.AcquireNextFrame(timeout, &mut info, &mut resource) } {
-            Ok(()) => {}
-            Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT && self.staging.is_some() => {
+        let deadline = Instant::now() + Duration::from_millis(500);
+        loop {
+            let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+            let mut resource: Option<IDXGIResource> = None;
+            let timeout = if first || self.staging.is_none() {
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u32::MAX)
+            } else {
+                0
+            };
+            // SAFETY: out-pointers are valid locals; the frame is released below on every path.
+            match unsafe { dup.AcquireNextFrame(timeout, &mut info, &mut resource) } {
+                Ok(()) => {}
+                Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT && self.staging.is_some() => {
+                    return self.read_staging();
+                }
+                Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
+                    self.duplication = None;
+                    self.staging = None;
+                    return Err(err("AcquireNextFrame", e));
+                }
+                Err(e) => return Err(err("AcquireNextFrame", e)),
+            }
+            self.update_pointer(&dup, &info);
+            // A frame with no present time only moved the pointer, and its texture does not
+            // hold the desktop yet on a fresh duplication: copying it gave a black first
+            // capture. Keep the last image, or wait for the first real one.
+            let has_image = info.LastPresentTime != 0;
+            let copied = if has_image {
+                resource
+                    .ok_or_else(|| CaptureError::Platform {
+                        api: "AcquireNextFrame",
+                        message: "no frame resource".into(),
+                    })
+                    .and_then(|r| {
+                        r.cast::<ID3D11Texture2D>()
+                            .map_err(|e| err("ID3D11Texture2D", e))
+                    })
+                    .and_then(|texture| self.copy_to_staging(&texture))
+            } else {
+                Ok(())
+            };
+            // SAFETY: a frame was acquired above.
+            let released = unsafe { dup.ReleaseFrame() }.map_err(|e| err("ReleaseFrame", e));
+            copied?;
+            released?;
+            if has_image || self.staging.is_some() {
                 return self.read_staging();
             }
-            Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
-                self.duplication = None;
-                self.staging = None;
-                return Err(err("AcquireNextFrame", e));
-            }
-            Err(e) => return Err(err("AcquireNextFrame", e)),
         }
-        self.update_pointer(&dup, &info);
-        let copied = resource
-            .ok_or_else(|| CaptureError::Platform {
-                api: "AcquireNextFrame",
-                message: "no frame resource".into(),
-            })
-            .and_then(|r| {
-                r.cast::<ID3D11Texture2D>()
-                    .map_err(|e| err("ID3D11Texture2D", e))
-            })
-            .and_then(|texture| self.copy_to_staging(&texture));
-        // SAFETY: a frame was acquired above.
-        let released = unsafe { dup.ReleaseFrame() }.map_err(|e| err("ReleaseFrame", e));
-        copied?;
-        released?;
-        self.read_staging()
     }
 
     /// Tracks the pointer from a frame's info: its position when the mouse moved, its shape
