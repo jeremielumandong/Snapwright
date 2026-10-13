@@ -161,7 +161,6 @@ impl Recognizer {
 
 /// `image` resized by `scale` (bilinear), as RGBA. Used to bring small UI text up to the size
 /// an engine reads best, or a huge image down under an engine's limit.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn resized_rgba(image: &Image<'_>, scale: f32) -> (Vec<u8>, u32, u32) {
     let w = ((image.width as f32 * scale).round() as u32).max(1);
     let h = ((image.height as f32 * scale).round() as u32).max(1);
