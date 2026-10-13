@@ -340,7 +340,7 @@ pub struct EditorView {
     status: SharedString,
     focus: FocusHandle,
     _release: Subscription,
-    _appearance: Subscription,
+    _appearance: [Subscription; 2],
 }
 
 impl EditorView {
@@ -366,8 +366,10 @@ impl EditorView {
                 .0
                 .retain(|(i, _)| *i != id);
         });
-        let appearance =
-            cx.observe_window_appearance(window, |_, window, cx| theme::sync(window, cx));
+        let appearance = [
+            cx.observe_window_appearance(window, |_, window, cx| theme::sync(window, cx)),
+            cx.observe_window_activation(window, |_, window, cx| theme::activated(window, cx)),
+        ];
         let mut view = Self {
             id,
             names,

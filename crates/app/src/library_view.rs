@@ -27,7 +27,7 @@ use snapwright_library::{Capture, Library, Query, Source};
 
 use crate::session::{self, LibraryService};
 use crate::theme::{self, Palette};
-use crate::{assets, countdown, editor_view, hotkey, toast};
+use crate::{assets, countdown, editor_view, toast, tray};
 
 const SIDEBAR_W: f32 = 216.;
 const DETAIL_W: f32 = 340.;
@@ -251,6 +251,7 @@ impl LibraryView {
             }),
             cx.observe_global_in::<LibraryChanged>(window, |this, _, cx| this.reload(cx)),
             cx.observe_window_appearance(window, |_, window, cx| theme::sync(window, cx)),
+            cx.observe_window_activation(window, |_, window, cx| theme::activated(window, cx)),
         ];
         let grid_focus = cx.focus_handle();
         window.focus(&grid_focus, cx);
@@ -656,12 +657,12 @@ impl LibraryView {
             .child(self.render_hotkey_card(p, cx))
     }
 
-    /// How to take a capture: the hotkey as keycaps, or the compositor binding on Wayland.
+    /// How to take a capture: the hotkey as keycaps (a Hyprland bind counts), or the
+    /// compositor binding on other Wayland compositors.
     fn render_hotkey_card(&self, p: &Palette, cx: &App) -> impl IntoElement {
         let label = cx
-            .try_global::<hotkey::Registered>()
-            .and_then(|h| h.label(hotkey::Action::Capture))
-            .map(str::to_owned);
+            .try_global::<tray::Labels>()
+            .and_then(|l| l.capture.clone());
         let body = match label {
             Some(label) => div()
                 .flex()

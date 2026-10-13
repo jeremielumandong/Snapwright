@@ -1,4 +1,4 @@
-//! The tray (menu bar) icon: Capture, Record, Open captures folder, Quit.
+//! The tray (menu bar) icon: Capture, Record, Open captures folder, Theme, Quit.
 //!
 //! macOS and Windows use the native status item; Linux uses StatusNotifierItem over D-Bus
 //! (`tray-icon`'s `ksni` backend), so no GTK is needed. Menu clicks arrive on a platform
@@ -6,8 +6,13 @@
 
 use anyhow::Result;
 use futures::channel::mpsc;
-use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{
+    CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+
+use crate::hotkey;
+use crate::theme::Choice;
 
 /// What the user picked from the tray menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +24,7 @@ pub enum Action {
     RecordGif,
     OpenLibrary,
     OpenFolder,
+    Theme(Choice),
     Quit,
 }
 
@@ -27,6 +33,7 @@ pub struct Tray {
     _icon: TrayIcon,
     record: MenuItem,
     record_gif: MenuItem,
+    themes: Vec<(Choice, CheckMenuItem)>,
     labels: Labels,
 }
 
@@ -45,6 +52,15 @@ impl Tray {
     }
 }
 
+impl Tray {
+    /// Ticks the theme in use (a click toggles the item itself, so set every one).
+    pub fn set_theme(&self, choice: Choice) {
+        for (c, item) in &self.themes {
+            item.set_checked(*c == choice);
+        }
+    }
+}
+
 impl gpui_kit::Global for Tray {}
 
 const ID_CAPTURE: &str = "capture";
@@ -55,6 +71,7 @@ const ID_RECORD_GIF: &str = "record-gif";
 const ID_OPEN: &str = "open-folder";
 const ID_LIBRARY: &str = "library";
 const ID_QUIT: &str = "quit";
+const ID_THEME_PREFIX: &str = "theme-";
 
 /// Shortcut labels shown beside menu items.
 #[derive(Debug, Clone, Default)]
@@ -65,6 +82,26 @@ pub struct Labels {
     pub record_gif: Option<String>,
 }
 
+/// The shortcuts that work in this session, for the library's hint too.
+impl gpui_kit::Global for Labels {}
+
+impl Labels {
+    pub fn from_actions(labels: &[(hotkey::Action, String)]) -> Self {
+        let find = |action| {
+            labels
+                .iter()
+                .find(|(a, _)| *a == action)
+                .map(|(_, l)| l.clone())
+        };
+        Self {
+            capture: find(hotkey::Action::Capture),
+            repeat: find(hotkey::Action::RepeatLast),
+            record: find(hotkey::Action::Record),
+            record_gif: find(hotkey::Action::RecordGif),
+        }
+    }
+}
+
 fn with_shortcut(text: &str, shortcut: Option<&String>) -> String {
     match shortcut {
         Some(k) => format!("{text}\t{k}"),
@@ -72,9 +109,29 @@ fn with_shortcut(text: &str, shortcut: Option<&String>) -> String {
     }
 }
 
-/// Creates the tray icon. Call on the main thread once the app is running.
-pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
+/// Creates the tray icon. Call on the main thread once the app is running. `omarchy` adds
+/// "Follow Omarchy" to the Theme menu.
+pub fn create(
+    labels: &Labels,
+    theme: Choice,
+    omarchy: bool,
+) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
     let menu = Menu::new();
+    let themes: Vec<(Choice, CheckMenuItem)> = Choice::ALL
+        .into_iter()
+        .filter(|c| omarchy || *c != Choice::Omarchy || theme == Choice::Omarchy)
+        .map(|c| {
+            let id = format!("{ID_THEME_PREFIX}{}", c.key());
+            (
+                c,
+                CheckMenuItem::with_id(id, c.label(), true, c == theme, None),
+            )
+        })
+        .collect();
+    let theme_menu = Submenu::with_id("theme", "Theme", true);
+    for (_, item) in &themes {
+        theme_menu.append(item)?;
+    }
     let record = MenuItem::with_id(
         ID_RECORD,
         with_shortcut("Record screen", labels.record.as_ref()),
@@ -107,6 +164,7 @@ pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)
         &PredefinedMenuItem::separator(),
         &MenuItem::with_id(ID_LIBRARY, "Open library", true, None),
         &MenuItem::with_id(ID_OPEN, "Open captures folder", true, None),
+        &theme_menu,
         &PredefinedMenuItem::separator(),
         &MenuItem::with_id(ID_QUIT, "Quit Snapwright", true, None),
     ])?;
@@ -140,6 +198,7 @@ pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)
             _icon: icon,
             record,
             record_gif,
+            themes,
             labels: labels.clone(),
         },
         rx,
@@ -156,7 +215,10 @@ fn action_for(id: &MenuId) -> Option<Action> {
         ID_LIBRARY => Some(Action::OpenLibrary),
         ID_OPEN => Some(Action::OpenFolder),
         ID_QUIT => Some(Action::Quit),
-        _ => None,
+        other => other
+            .strip_prefix(ID_THEME_PREFIX)
+            .and_then(Choice::from_key)
+            .map(Action::Theme),
     }
 }
 
@@ -226,6 +288,11 @@ mod tests {
             Some(Action::OpenLibrary)
         );
         assert_eq!(action_for(&MenuId::new(ID_QUIT)), Some(Action::Quit));
+        assert_eq!(
+            action_for(&MenuId::new("theme-omarchy")),
+            Some(Action::Theme(Choice::Omarchy))
+        );
+        assert_eq!(action_for(&MenuId::new("theme-sepia")), None);
         assert_eq!(action_for(&MenuId::new("other")), None);
     }
 
