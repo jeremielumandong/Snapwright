@@ -9,14 +9,18 @@ mod countdown;
 mod editor_view;
 mod hotkey;
 #[cfg(target_os = "linux")]
+mod hyprland;
+#[cfg(target_os = "linux")]
 mod instance;
 mod library_view;
 mod ocr;
+mod omarchy;
 mod output;
 mod overlay;
 mod recording;
 mod selection;
 mod session;
+mod settings;
 mod theme;
 mod toast;
 mod tray;
@@ -46,8 +50,8 @@ enum Request {
     RecordGif,
 }
 
-/// `--capture-now` starts a capture as soon as the app is up, or in the running app (bind it
-/// to a key in a Wayland compositor).
+/// `--capture-now` starts a capture as soon as the app is up, or in the running app (what
+/// the Hyprland binds run; bind it to a key in other Wayland compositors).
 const CAPTURE_NOW_ARG: &str = "--capture-now";
 /// `--repeat-last` captures the last region again.
 const REPEAT_LAST_ARG: &str = "--repeat-last";
@@ -83,12 +87,20 @@ fn main() -> Result<()> {
             None
         }
     };
+    // Read before the UI thread starts, so the first window opens in the right colors.
+    let omarchy = omarchy::load();
+    let theme = settings::load().theme.unwrap_or(if omarchy.is_some() {
+        theme::Choice::Omarchy
+    } else {
+        theme::Choice::System
+    });
 
     gpui_kit::application()
         .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
-            theme::init(cx);
+            let has_omarchy = omarchy.is_some();
+            theme::init(theme, omarchy, cx);
             if let Err(e) = session::init(cx) {
                 tracing::error!(error = %e, "screen capture is unavailable");
                 cx.quit();
@@ -104,51 +116,13 @@ fn main() -> Result<()> {
                 })
                 .detach();
             }
-            let hotkeys = if snapwright_capture::wayland_session() {
-                // X11 key grabs under XWayland only fire while an X window has focus.
-                tracing::info!(
-                    "no global hotkeys on Wayland; bind `snapwright-app --capture-now` \
-                     (and `--repeat-last`) to keys in your compositor"
-                );
-                Err(anyhow::anyhow!("Wayland session"))
+            let labels = if snapwright_capture::wayland_session() {
+                wayland_shortcuts(cx)
             } else {
-                hotkey::register()
+                x11_hotkeys(cx)
             };
-            let labels = match hotkeys {
-                Ok((hotkeys, mut presses)) => {
-                    for (action, label) in &hotkeys.labels {
-                        tracing::info!(hotkey = %label, ?action, "hotkey registered");
-                    }
-                    let labels = tray::Labels {
-                        capture: hotkeys.label(hotkey::Action::Capture).map(str::to_owned),
-                        repeat: hotkeys.label(hotkey::Action::RepeatLast).map(str::to_owned),
-                        record: hotkeys.label(hotkey::Action::Record).map(str::to_owned),
-                        record_gif: hotkeys.label(hotkey::Action::RecordGif).map(str::to_owned),
-                    };
-                    cx.set_global(hotkeys);
-                    cx.spawn(async move |cx| {
-                        while let Some((action, pressed_at)) = presses.next().await {
-                            cx.update(|cx| match action {
-                                hotkey::Action::Capture => session::start(pressed_at, cx),
-                                hotkey::Action::RepeatLast => session::repeat_last(pressed_at, cx),
-                                hotkey::Action::Record => {
-                                    recording::toggle(Format::Mp4, pressed_at, cx)
-                                }
-                                hotkey::Action::RecordGif => {
-                                    recording::toggle(Format::Gif, pressed_at, cx)
-                                }
-                            });
-                        }
-                    })
-                    .detach();
-                    labels
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "global hotkeys unavailable");
-                    tray::Labels::default()
-                }
-            };
-            match tray::create(&labels) {
+            cx.set_global(labels.clone());
+            match tray::create(&labels, theme, has_omarchy) {
                 Ok((tray, mut actions)) => {
                     cx.set_global(tray);
                     cx.spawn(async move |cx| {
@@ -169,6 +143,76 @@ fn main() -> Result<()> {
     // "Restart to update" quit the app; start the new version or its installer now.
     updates::run_after_exit();
     Ok(())
+}
+
+/// Registers the global hotkeys (X11, macOS, Windows) and returns their tray labels.
+fn x11_hotkeys(cx: &mut gpui_kit::App) -> tray::Labels {
+    let (hotkeys, mut presses) = match hotkey::register() {
+        Ok(registered) => registered,
+        Err(e) => {
+            tracing::warn!(error = %e, "global hotkeys unavailable");
+            return tray::Labels::default();
+        }
+    };
+    for (action, label) in &hotkeys.labels {
+        tracing::info!(hotkey = %label, ?action, "hotkey registered");
+    }
+    let labels = tray::Labels::from_actions(&hotkeys.labels);
+    cx.set_global(hotkeys);
+    cx.spawn(async move |cx| {
+        while let Some((action, pressed_at)) = presses.next().await {
+            cx.update(|cx| match action {
+                hotkey::Action::Capture => session::start(pressed_at, cx),
+                hotkey::Action::RepeatLast => session::repeat_last(pressed_at, cx),
+                hotkey::Action::Record => recording::toggle(Format::Mp4, pressed_at, cx),
+                hotkey::Action::RecordGif => recording::toggle(Format::Gif, pressed_at, cx),
+            });
+        }
+    })
+    .detach();
+    labels
+}
+
+/// Wayland has no global key grabs (X11 grabs under XWayland only fire while an X window
+/// has focus). On Hyprland the app binds its shortcuts in the compositor; elsewhere the user
+/// binds `snapwright-app --capture-now` themselves.
+#[cfg(target_os = "linux")]
+fn wayland_shortcuts(cx: &mut gpui_kit::App) -> tray::Labels {
+    let (Some(dir), Some(exe)) = (hyprland::instance_dir(), hyprland::exe()) else {
+        tracing::info!(
+            "no global hotkeys on this Wayland compositor; bind `snapwright-app --capture-now` \
+             (and `--repeat-last`) to keys in its config"
+        );
+        return tray::Labels::default();
+    };
+    let bound = match hyprland::bind(&dir, &exe) {
+        Ok(bound) => bound,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not bind the shortcuts in Hyprland");
+            return tray::Labels::default();
+        }
+    };
+    for (action, label) in &bound {
+        tracing::info!(hotkey = %label, ?action, "Hyprland bind added");
+    }
+    // Omarchy switches themes with a Hyprland reload, so this is also when to re-read it.
+    match hyprland::watch(dir, exe) {
+        Ok(mut reloads) => {
+            cx.spawn(async move |cx| {
+                while reloads.next().await.is_some() {
+                    cx.update(omarchy::reload);
+                }
+            })
+            .detach();
+        }
+        Err(e) => tracing::warn!(error = %e, "Hyprland events unavailable"),
+    }
+    tray::Labels::from_actions(&bound)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wayland_shortcuts(_cx: &mut gpui_kit::App) -> tray::Labels {
+    tray::Labels::default()
 }
 
 /// What the command line asks for, in the order the app does it.
@@ -232,6 +276,12 @@ fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
             }
             Err(e) => tracing::warn!(error = %e, "no captures folder"),
         },
+        tray::Action::Theme(choice) => {
+            theme::choose(choice, cx);
+            if let Some(tray) = cx.try_global::<tray::Tray>() {
+                tray.set_theme(choice);
+            }
+        }
         tray::Action::Update => updates::on_tray(cx),
         tray::Action::Quit => cx.quit(),
     }

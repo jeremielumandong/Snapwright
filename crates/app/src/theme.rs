@@ -1,11 +1,14 @@
 //! Design tokens from the UI refresh (`docs/design/`): a light and a dark palette for the
 //! windows, one always-dark material for the capture HUDs, and the bridge into
-//! gpui-component's theme so its inputs and buttons match. The app follows the system
-//! appearance.
+//! gpui-component's theme so its inputs and buttons match. The tray's Theme menu picks
+//! between the system appearance, light, dark and (on Omarchy) the Omarchy theme.
 
 use std::borrow::Cow;
 
 use gpui_kit::component::{Theme, ThemeMode};
+
+use crate::omarchy::{self, OmarchyColors};
+use crate::settings;
 use gpui_kit::{
     App, Div, FontWeight, Global, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _,
     Window, WindowAppearance, div, px, rgb, rgba,
@@ -166,35 +169,128 @@ pub mod hud {
 pub struct Active(pub Palette);
 impl Global for Active {}
 
+/// Which palette the windows use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    /// Light or dark with the system appearance.
+    System,
+    Light,
+    Dark,
+    /// The colors of the active Omarchy theme (Linux).
+    Omarchy,
+}
+
+impl Choice {
+    pub const ALL: [Choice; 4] = [Choice::System, Choice::Light, Choice::Dark, Choice::Omarchy];
+
+    /// The name saved in the settings file.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::Omarchy => "omarchy",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.key() == key)
+    }
+
+    /// The tray menu item.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "Match system",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+            Self::Omarchy => "Follow Omarchy",
+        }
+    }
+}
+
+/// The theme the user picked.
+struct Chosen(Choice);
+impl Global for Chosen {}
+
+/// The theme the user picked.
+pub fn choice(cx: &App) -> Choice {
+    cx.try_global::<Chosen>().map_or(Choice::System, |c| c.0)
+}
+
 /// The active window palette.
 pub fn palette(cx: &App) -> Palette {
     cx.try_global::<Active>()
         .map_or_else(Palette::light, |a| a.0)
 }
 
-/// Loads the bundled fonts and applies the palette for the system appearance.
-pub fn init(cx: &mut App) {
+/// Loads the bundled fonts and applies the palette for `choice`. `omarchy` is the Omarchy
+/// theme read at launch, if there is one.
+pub fn init(choice: Choice, omarchy: Option<OmarchyColors>, cx: &mut App) {
     let fonts: Vec<Cow<'static, [u8]>> = FONTS.iter().map(|f| Cow::Borrowed(*f)).collect();
     if let Err(e) = cx.text_system().add_fonts(fonts) {
         tracing::warn!(error = %e, "could not load the bundled fonts");
     }
-    apply(cx.window_appearance(), cx);
+    omarchy::set(omarchy, cx);
+    cx.set_global(Chosen(choice));
+    refresh(cx);
+}
+
+/// Switches to `choice` and saves it.
+pub fn choose(choice: Choice, cx: &mut App) {
+    cx.set_global(Chosen(choice));
+    refresh(cx);
+    if choice == Choice::Omarchy {
+        omarchy::reload(cx);
+    }
+    cx.background_executor()
+        .spawn(async move {
+            let settings = settings::Settings {
+                theme: Some(choice),
+            };
+            if let Err(e) = settings::save(&settings) {
+                tracing::warn!(error = %e, "could not save the theme");
+            }
+        })
+        .detach();
+}
+
+/// Re-applies the palette for the current choice (after the system appearance or the
+/// Omarchy theme changed).
+pub fn refresh(cx: &mut App) {
+    let p = match choice(cx) {
+        Choice::System => Palette::for_appearance(cx.window_appearance()),
+        Choice::Light => Palette::light(),
+        Choice::Dark => Palette::dark(),
+        Choice::Omarchy => {
+            omarchy::palette(cx).unwrap_or_else(|| Palette::for_appearance(cx.window_appearance()))
+        }
+    };
+    apply(p, cx);
 }
 
 /// Follows a window's appearance (the system light or dark setting) when it changes.
 pub fn sync(window: &Window, cx: &mut App) {
+    if choice(cx) != Choice::System {
+        return;
+    }
     let dark = matches!(
         window.appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
     );
     if dark != palette(cx).dark {
-        apply(window.appearance(), cx);
+        apply(Palette::for_appearance(window.appearance()), cx);
     }
 }
 
-/// Stores the palette for `appearance` and restyles gpui-component to match.
-fn apply(appearance: WindowAppearance, cx: &mut App) {
-    let p = Palette::for_appearance(appearance);
+/// A window came to the front: pick up an Omarchy theme switched while it was away.
+pub fn activated(window: &Window, cx: &mut App) {
+    if window.is_window_active() && choice(cx) == Choice::Omarchy {
+        omarchy::reload(cx);
+    }
+}
+
+/// Stores the palette and restyles gpui-component to match.
+fn apply(p: Palette, cx: &mut App) {
     cx.set_global(Active(p));
     Theme::change(
         if p.dark {
