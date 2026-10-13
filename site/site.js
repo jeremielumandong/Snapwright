@@ -11,10 +11,13 @@
     [0.005, 0.0, 0.165, 0.245],
     [0.355, 0.07, 0.69, 0.32]
   ];
+  // Stable names the release workflows upload next to the versioned files
+  // (scripts/upload-release-assets.py), so these always fetch the newest build.
+  var LATEST = "https://github.com/jeremielumandong/Snapwright/releases/latest/download/";
   var PLAT = {
-    mac: { short: "macOS", label: "Download for macOS", sub: "Universal DMG · Apple silicon & Intel", mod: "⌘", alt: "Option" },
-    windows: { short: "Windows", label: "Download for Windows", sub: "Installer · Windows 10 & 11 · x64", mod: "Ctrl", alt: "Alt" },
-    linux: { short: "Linux", label: "Download for Linux", sub: "AppImage · x86_64", mod: "Ctrl", alt: "Alt" }
+    mac: { short: "macOS", label: "Download for macOS", sub: "Universal DMG · Apple silicon & Intel", mod: "⌘", alt: "Option", file: "Snapwright-macos-universal.dmg" },
+    windows: { short: "Windows", label: "Download for Windows", sub: "Installer · Windows 10 & 11 · x64", mod: "Ctrl", alt: "Alt", file: "Snapwright-windows-x64-setup.exe" },
+    linux: { short: "Linux", label: "Download for Linux", sub: "AppImage · x86_64", mod: "Ctrl", alt: "Alt", file: "Snapwright-linux-x86_64.AppImage" }
   };
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -30,6 +33,7 @@
   setText("[data-dl-sub]", P.sub);
   setText("[data-mod]", P.mod);
   setText("[data-alt]", P.alt);
+  $$("[data-dl-href]").forEach(function (el) { el.href = LATEST + P.file; });
   $$("[data-platform]").forEach(function (el) {
     el.classList.toggle("mine", el.getAttribute("data-platform") === plat);
   });
