@@ -15,7 +15,9 @@ use objc2_vision::{
     VNImageRequestHandler, VNRecognizeTextRequest, VNRequest, VNRequestTextRecognitionLevel,
 };
 
-use crate::{Bounds, Config, Error, Image, Line, Order, Result, reading_order, spans};
+use crate::{
+    Bounds, Config, Error, Image, Line, Order, Result, reading_order, resized_rgba, spans,
+};
 
 /// Smallest text, in pixels, Vision is asked to read.
 const MIN_TEXT_PX: f32 = 8.0;
@@ -23,6 +25,8 @@ const MIN_TEXT_PX: f32 = 8.0;
 /// small UI text there, but reads the same text cleanly in a crop of about this size.
 const TILE: usize = 1024;
 const OVERLAP: usize = 128;
+/// Images up to this long side are read at 2x: Vision misreads some 1x UI text ("renort").
+const UPSCALE_MAX_SIDE: u32 = 4096;
 
 pub struct Backend;
 
@@ -32,6 +36,23 @@ impl Backend {
     }
 
     pub fn recognize(&mut self, image: &Image<'_>) -> Result<Vec<Line>> {
+        let scale = if image.width.max(image.height) <= UPSCALE_MAX_SIDE {
+            2.0
+        } else {
+            1.0
+        };
+        let owned;
+        let image = if scale != 1.0 {
+            owned = resized_rgba(image, scale);
+            &Image {
+                pixels: &owned.0,
+                width: owned.1,
+                height: owned.2,
+                order: Order::Rgba,
+            }
+        } else {
+            image
+        };
         let (width, height) = (image.width as usize, image.height as usize);
         let mut lines = Vec::new();
         for xs in spans(width, TILE, OVERLAP) {
@@ -53,8 +74,11 @@ impl Backend {
                     let cx = xs.start + (b.x + b.width / 2) as usize;
                     let cy = ys.start + (b.y + b.height / 2) as usize;
                     if xs.own.contains(&cx) && ys.own.contains(&cy) {
-                        b.x += xs.start as u32;
-                        b.y += ys.start as u32;
+                        let unscale = |v: u32| (v as f32 / scale).round() as u32;
+                        b.x = unscale(b.x + xs.start as u32);
+                        b.y = unscale(b.y + ys.start as u32);
+                        b.width = unscale(b.width);
+                        b.height = unscale(b.height);
                         lines.push(line);
                     }
                 }
