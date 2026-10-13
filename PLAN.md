@@ -90,6 +90,12 @@ Gate: 1,000 beta users and 99.5% crash-free sessions.
 ## Phase 3: v1.0 (weeks 27 to 36)
 
 - [ ] Screen recording to MP4 and GIF; S3 uploads; after-capture workflows.
+      Note: recording pulled forward (Jeremie, 2026-10-13). `snapwright-record` records a
+      display or region with the pointer to MP4 (AVFoundation, Media Foundation, ffmpeg on
+      Linux) or GIF (pure Rust, changed rectangles only), with pause. Ctrl/Cmd+Shift+6 (GIF:
+      +Alt) picks the area in the overlay, a bar beside it shows time, Pause and Stop; the
+      video goes to `Movies/Snapwright` and the library. `snapwright record` in the CLI.
+      S3 uploads and after-capture workflows remain.
 - [ ] CLI library queries; licensing and payments; docs site.
 
 ## Open decisions
@@ -97,6 +103,23 @@ Gate: 1,000 beta users and 99.5% crash-free sessions.
 Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 
 ## Follow-ups
+
+- Recording: system audio and microphone (ScreenCaptureKit audio, WASAPI loopback), mixed
+  into the MP4. The biggest gap against Snagit, CleanShot X and Loom.
+- Recording: macOS through a running `SCStream` (IOSurfaces straight into the writer, 60 fps)
+  instead of one `SCScreenshotManager` grab per frame; Windows straight from the duplication
+  texture into a GPU NV12 conversion.
+- Recording: click highlights and keystroke overlays; webcam bubble; trim before saving;
+  a countdown option; a dashed outline of the recorded area on screen.
+- Recording: auto-zoom on clicks (Screen Studio style) as an export step, from the pointer
+  path recorded alongside the video.
+- Recording: the bar on Wayland (a layer-shell anchor beside the area) and a portal backend.
+- Recording: write pointer positions, clicks and keystrokes to a sidecar event track next to
+  the video from day one, so click highlights, keystroke badges and auto-zoom stay
+  non-destructive edits (CleanShot bakes them in).
+- Recording: warm the encoder before the first frame and add hotkey-to-first-frame to
+  `latency-bench.sh`. CI's macOS VMs (software VideoToolbox) shed about half the frames of
+  the first second.
 
 - macOS: `SCScreenshotManager` costs ~15 ms a shot and ~270 ms cold. Try keeping an
   `SCStream` paused between captures, or starting one when the hotkey's modifiers go down.

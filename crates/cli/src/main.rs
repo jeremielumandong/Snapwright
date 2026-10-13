@@ -38,6 +38,24 @@ enum Command {
         #[arg(short, long, default_value = ".")]
         output: PathBuf,
     },
+    /// Record a display (or a region of it) to MP4 or GIF, with the pointer.
+    Record {
+        /// Display id from `snapwright displays`; the primary display when omitted.
+        #[arg(long)]
+        display: Option<u64>,
+        /// Region inside the display as `x,y,width,height` in pixels.
+        #[arg(long, value_parser = parse_rect)]
+        region: Option<Rect>,
+        /// Seconds to record; until Enter is pressed when omitted.
+        #[arg(long)]
+        seconds: Option<f64>,
+        /// Frames per second (default 30 for MP4, 15 for GIF).
+        #[arg(long)]
+        fps: Option<u32>,
+        /// Output file; `.mp4` or `.gif` picks the format.
+        #[arg(short, long, default_value = "recording.mp4")]
+        output: PathBuf,
+    },
     /// Time repeated captures of every display and report percentiles.
     Bench {
         /// Captures per display.
@@ -59,8 +77,70 @@ fn main() -> Result<()> {
             region,
             output,
         } => capture(display, region, &output),
+        Command::Record {
+            display,
+            region,
+            seconds,
+            fps,
+            output,
+        } => record(display, region, seconds, fps, output),
         Command::Bench { runs } => bench(runs),
     }
+}
+
+fn record(
+    display: Option<u64>,
+    region: Option<Rect>,
+    seconds: Option<f64>,
+    fps: Option<u32>,
+    output: PathBuf,
+) -> Result<()> {
+    use snapwright_record::{DisplaySource, Format, Options, Recorder};
+    let format = Format::from_path(&output)
+        .with_context(|| format!("{}: use a .mp4 or .gif file name", output.display()))?;
+    let mut capturer = Capturer::new()?;
+    let all = capturer.displays()?;
+    let chosen = match display {
+        Some(id) => all.iter().find(|d| d.id == id),
+        None => all.iter().find(|d| d.primary).or(all.first()),
+    }
+    .cloned()
+    .context("no such display; see `snapwright displays`")?;
+    let mut options = Options::new(format);
+    if let Some(fps) = fps {
+        options.fps = fps;
+    }
+    let source = DisplaySource::new(
+        std::sync::Arc::new(std::sync::Mutex::new(capturer)),
+        chosen,
+        region,
+    );
+    let recorder = Recorder::start(source, options, &output)?;
+    match seconds {
+        Some(s) => {
+            eprintln!("recording {} for {s} s", output.display());
+            std::thread::sleep(Duration::from_secs_f64(s.max(0.0)));
+        }
+        None => {
+            eprintln!("recording {}; press Enter to stop", output.display());
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+        }
+    }
+    let summary = recorder.stop()?;
+    println!(
+        "{}  {}x{}  {:.2} s  {} frames ({} dropped)",
+        summary.path.display(),
+        summary.width,
+        summary.height,
+        summary.duration.as_secs_f64(),
+        summary.frames,
+        summary.dropped
+    );
+    if let Some(why) = summary.interrupted {
+        bail!("recording stopped early: {why}");
+    }
+    Ok(())
 }
 
 fn displays() -> Result<()> {

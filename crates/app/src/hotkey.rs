@@ -2,6 +2,9 @@
 //!
 //! - Capture: Ctrl+Shift+2 (Cmd+Shift+2 on macOS).
 //! - Repeat last region: Ctrl+Alt+Shift+2 (Cmd+Option+Shift+2).
+//! - Record the screen (MP4), or stop recording: Ctrl+Shift+6 (Cmd+Shift+6). Shift+5 would
+//!   collide with macOS's own recording toolbar.
+//! - Record a GIF, or stop: Ctrl+Alt+Shift+6 (Cmd+Option+Shift+6).
 //!
 //! Configurable hotkeys come with settings.
 
@@ -17,6 +20,8 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 pub enum Action {
     Capture,
     RepeatLast,
+    Record,
+    RecordGif,
 }
 
 /// Keeps the hotkeys registered for the life of the app.
@@ -59,6 +64,19 @@ pub fn register() -> Result<(Registered, mpsc::UnboundedReceiver<(Action, Instan
                 Code::Digit2,
             ),
             format!("{primary_label}+{alt_label}+Shift+2"),
+        ),
+        (
+            Action::Record,
+            HotKey::new(Some(primary | Modifiers::SHIFT), Code::Digit6),
+            format!("{primary_label}+Shift+6"),
+        ),
+        (
+            Action::RecordGif,
+            HotKey::new(
+                Some(primary | Modifiers::ALT | Modifiers::SHIFT),
+                Code::Digit6,
+            ),
+            format!("{primary_label}+{alt_label}+Shift+6"),
         ),
     ];
     let manager = GlobalHotKeyManager::new()?;
