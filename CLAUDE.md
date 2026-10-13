@@ -81,6 +81,8 @@ site/                           marketing site (static HTML, deployed by .github
 - Windows: Desktop Duplication needs per-monitor DPI awareness, set in `Backend::new`.
   After the first frame, `AcquireNextFrame` only returns when the screen changed; on a
   timeout reuse the last staging texture.
+- Windows: a frame with `LastPresentTime == 0` only moved the pointer; on a fresh duplication
+  its texture is black. Copy only frames with a present time.
 - X11: Xvfb resets the root window when its last client disconnects; tests keep a
   connection open while they paint. Tests that paint the root window must not run in parallel.
 - Wayland: capture is `wlr-screencopy` (wlroots compositors only; GNOME/KDE wait for the
