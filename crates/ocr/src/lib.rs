@@ -195,7 +195,6 @@ fn resized_rgba(image: &Image<'_>, scale: f32) -> (Vec<u8>, u32, u32) {
 /// for (up to halfway into each overlap), so something cut by one tile's edge is counted once,
 /// from the tile where it is whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 struct Span {
     start: usize,
     end: usize,
@@ -203,7 +202,6 @@ struct Span {
 }
 
 /// Overlapping tiles of at most `tile` pixels covering `0..len`.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn spans(len: usize, tile: usize, overlap: usize) -> Vec<Span> {
     let step = tile.saturating_sub(overlap).max(1);
     let mut out: Vec<Span> = Vec::new();
