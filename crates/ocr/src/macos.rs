@@ -16,6 +16,9 @@ use objc2_vision::{
 
 use crate::{Bounds, Config, Error, Image, Line, Order, Result, reading_order};
 
+/// Smallest text, in pixels, Vision is asked to read.
+const MIN_TEXT_PX: f32 = 8.0;
+
 pub struct Backend;
 
 impl Backend {
@@ -62,6 +65,9 @@ fn recognize(image: &Image<'_>) -> Result<Vec<Line>> {
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
     request.setUsesLanguageCorrection(true);
+    // Vision ignores text shorter than 1/32 of the image by default (34 px on a 1080p screen),
+    // which drops ordinary UI text in a full-screen capture. Ask for anything from 8 px up.
+    request.setMinimumTextHeight((MIN_TEXT_PX / h as f32).min(1.0 / 32.0));
     // SAFETY: an empty options dictionary is valid for `initWithCGImage:options:`.
     let handler = unsafe {
         VNImageRequestHandler::initWithCGImage_options(
