@@ -141,6 +141,23 @@ struct Item {
     capture: Capture,
     image: PathBuf,
     thumb: PathBuf,
+    /// A recording's video file.
+    video: Option<PathBuf>,
+}
+
+impl Item {
+    /// The file the system opens for this capture: the video for a recording.
+    fn file(&self) -> &PathBuf {
+        self.video.as_ref().unwrap_or(&self.image)
+    }
+}
+
+/// Opens a capture: a recording plays in the system player, an image opens in the editor.
+fn open_item(item: &Item, cx: &mut App) {
+    match &item.video {
+        Some(video) => cx.open_with_system(video),
+        None => editor_view::open(item.capture.id, cx),
+    }
 }
 
 struct Loaded {
@@ -286,6 +303,7 @@ impl LibraryView {
                 .map(|c| Item {
                     image: lib.image_path_of(&c),
                     thumb: lib.thumb_path_of(&c),
+                    video: lib.video_path_of(&c),
                     capture: c,
                 })
                 .collect();
@@ -454,8 +472,8 @@ impl LibraryView {
             "delete" | "backspace" => self.trash_or_restore(cx),
             "c" if mods.secondary() => self.copy_selected(cx),
             "enter" | "e" if !mods.secondary() => {
-                if let Some(id) = self.selected {
-                    editor_view::open(id, cx);
+                if let Some(item) = self.selected_item().cloned() {
+                    open_item(&item, cx);
                 }
             }
             key @ ("left" | "right" | "up" | "down") => {
@@ -759,7 +777,7 @@ impl LibraryView {
                     if e.click_count() >= 2
                         && let Some(item) = this.selected_item()
                     {
-                        cx.open_with_system(&item.image);
+                        cx.open_with_system(item.file());
                     }
                 }),
             )
@@ -779,6 +797,30 @@ impl LibraryView {
                         d.group_hover("cell", |d| d.border_color(p.line2))
                     })
                     .child(fitted(item.thumb.clone()))
+                    .when_some(c.video.as_ref(), |d, v| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .right(px(8.))
+                                .bottom(px(8.))
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .px(px(7.))
+                                .rounded(px(5.))
+                                .bg(gpui_kit::hsla(240. / 360., 0.09, 0.1, 0.78))
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(gpui_kit::white())
+                                .child(Icon::new(IconName::Play).size(px(10.)))
+                                .child(format!(
+                                    "{} {}",
+                                    v.ext.to_uppercase(),
+                                    crate::toast::clock(v.duration_ms)
+                                )),
+                        )
+                    })
                     .when(c.edit.is_some(), |d| {
                         d.child(
                             div()
@@ -927,7 +969,15 @@ impl LibraryView {
             .text_size(px(12.5))
             .child(line("Captured", text(when(c.created_ms))))
             .child(line("Dimensions", text(format!("{w} × {h} px"))))
-            .child(line("File size", text(human_bytes(c.shown_bytes()))))
+            .when_some(c.video.as_ref(), |d, v| {
+                d.child(line("Length", text(crate::toast::clock(v.duration_ms))))
+            })
+            .child(line(
+                "File size",
+                text(human_bytes(
+                    c.video.as_ref().map_or(c.shown_bytes(), |v| v.bytes),
+                )),
+            ))
             .child(line(
                 "Source",
                 div()
@@ -1046,7 +1096,19 @@ impl LibraryView {
                     .label("Copy")
                     .on_click(cx.listener(|this, _, _, cx| this.copy_selected(cx))),
             )
-            .child(
+            .child(if c.video.is_some() {
+                Button::new("play")
+                    .outline()
+                    .flex_1()
+                    .icon(Icon::new(IconName::Play))
+                    .label("Play")
+                    .tooltip("Play in the system player (Enter)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(item) = this.selected_item().cloned() {
+                            open_item(&item, cx);
+                        }
+                    }))
+            } else {
                 Button::new("edit")
                     .outline()
                     .flex_1()
@@ -1057,13 +1119,13 @@ impl LibraryView {
                         if let Some(id) = this.selected {
                             editor_view::open(id, cx);
                         }
-                    })),
-            )
+                    }))
+            })
             .child(
                 icon_button("open", IconName::ExternalLink, "Open").on_click(cx.listener(
                     |this, _, _, cx| {
                         if let Some(item) = this.selected_item() {
-                            cx.open_with_system(&item.image);
+                            cx.open_with_system(item.file());
                         }
                     },
                 )),
@@ -1072,7 +1134,7 @@ impl LibraryView {
                 icon_button("reveal", IconName::FolderOpen, "Show file").on_click(cx.listener(
                     |this, _, _, cx| {
                         if let Some(item) = this.selected_item() {
-                            cx.reveal_path(&item.image);
+                            cx.reveal_path(item.file());
                         }
                     },
                 )),
@@ -1426,6 +1488,7 @@ mod tests {
             text: String::new(),
             trashed: false,
             edit: None,
+            video: None,
         }
     }
 

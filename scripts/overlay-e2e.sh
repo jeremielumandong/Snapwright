@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # End-to-end overlay test under Xvfb: hotkey, overlay timing, Esc, drag-select, click,
-# keyboard adjust, repeat last region, colour copy, clipboard, preview, library and editor.
+# keyboard adjust, repeat last region, colour copy, clipboard, preview, library, editor and
+# screen recording.
 # Usage: xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh <target dir>
-# Needs xdotool, xclip, xsetroot (x11-xserver-utils), ImageMagick and a Vulkan driver.
+# Needs xdotool, xclip, xsetroot (x11-xserver-utils), ImageMagick, ffmpeg and a Vulkan driver.
 set -euo pipefail
 BIN=${1:-target/release}
 OUT=${E2E_OUT:-$(mktemp -d)}
@@ -31,10 +32,10 @@ fail() { echo "FAIL: $*"; cat "$OUT/app.log"; exit 1; }
 xdotool key ctrl+shift+2; sleep 1
 for _ in $(seq 10); do
   "$BIN/snapwright" capture -o "$OUT/overlay.png" 2>/dev/null
-  [ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(28,56,112,1)" ] && break
+  [ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(30,56,109,1)" ] && break
   sleep 0.5
 done
-[ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(28,56,112,1)" ] || fail "overlay not shown dimmed"
+[ "$(pixel "$OUT/overlay.png" 300 300)" = "srgba(30,56,109,1)" ] || fail "overlay not shown dimmed"
 xdotool key Escape; sleep 1
 "$BIN/snapwright" capture -o "$OUT/after.png" 2>/dev/null
 [ "$(pixel "$OUT/after.png" 300 300)" = "srgba(51,102,204,1)" ] || fail "Esc did not close the overlay"
@@ -100,8 +101,8 @@ xclip -selection clipboard -t image/png -o > "$OUT/plain.png"
 xdotool mousemove 1527 966 click 1; sleep 3
 eval "$(xdotool search --name "Snapwright Editor" getwindowgeometry --shell)" \
   || fail "the preview's Edit did not open the editor"
-# The 400x200 image sits centred under the toolbar at 1:1.
-IX=$((X + 250)); IY=$((Y + 192))
+# The 400x200 image sits centred in the canvas, right of the tool rail, at 1:1.
+IX=$((X + 278)); IY=$((Y + 209))
 at() { echo $((IX + $1)) $((IY + $2)); }
 xdotool mousemove $(at 100 100); sleep 0.3
 xdotool key r mousemove $(at 48 28) mousedown 1 mousemove $(at 100 60) mousemove $(at 158 108) mouseup 1
@@ -138,5 +139,26 @@ xdotool key ctrl+alt+shift+2; sleep 1.5
 xclip -selection clipboard -t image/png -o > "$OUT/corner-again.png"
 [ "$(compare -metric AE "$OUT/corner.png" "$OUT/corner-again.png" null: 2>&1)" = "0" ] \
   || fail "the preview got into a repeat capture"
+
+# 9. Ctrl+Shift+6 records a dragged region, with a bar under it showing the time; the hotkey
+# again stops. The MP4 has the region's size and lands in the recordings folder.
+xdotool key ctrl+shift+6; sleep 1
+xdotool mousemove 200 150 mousedown 1 mousemove 400 300 mousemove 600 450; sleep 0.3
+xdotool mouseup 1; sleep 1.5
+"$BIN/snapwright" capture -o "$OUT/recording.png" 2>/dev/null
+xdotool mousemove 300 250; sleep 0.5; xdotool mousemove 500 350; sleep 1
+xdotool key ctrl+shift+6; sleep 3
+"$BIN/snapwright" capture -o "$OUT/recorded.png" 2>/dev/null
+[ "$(pixel "$OUT/recording.png" 400 484)" != "$(pixel "$OUT/recorded.png" 400 484)" ] \
+  || fail "no recording bar under the region"
+grep -q "recording saved" "$OUT/app.log" || fail "recording not saved"
+mp4=$(find "$HOME" -path "*Snapwright/*.mp4" -print -quit)
+[ -n "$mp4" ] || fail "no MP4 in the recordings folder"
+probe=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height \
+  -show_entries format=duration -of default=noprint_wrappers=1 "$mp4")
+echo "$probe" | grep -q "codec_name=h264" || fail "recording is not H.264: $probe"
+echo "$probe" | grep -q "width=400" && echo "$probe" | grep -q "height=300" \
+  || fail "recording size: $probe"
+grep -E "recording saved" "$OUT/app.log" | sed 's/\x1b\[[0-9;]*m//g'
 
 echo "PASS"

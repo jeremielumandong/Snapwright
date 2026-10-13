@@ -6382,6 +6382,7 @@ dependencies = [
  "snapwright-capture",
  "snapwright-editor",
  "snapwright-library",
+ "snapwright-record",
  "tracing",
  "tracing-subscriber",
  "tray-icon",
