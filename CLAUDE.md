@@ -57,6 +57,7 @@ crates/
   record/   snapwright-record   screen recording: paced capture, MP4 (OS encoders / ffmpeg) and GIF
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
+install.sh                      Linux one-line installer: latest AppImage, checksum, launcher, CLI
 site/                           marketing site (static HTML, deployed by .github/workflows/pages.yml)
 ```
 

@@ -17,7 +17,7 @@
   var PLAT = {
     mac: { short: "macOS", label: "Download for macOS", sub: "Universal DMG · Apple silicon & Intel", mod: "⌘", alt: "Option", file: "Snapwright-macos-universal.dmg" },
     windows: { short: "Windows", label: "Download for Windows", sub: "Installer · Windows 10 & 11 · x64", mod: "Ctrl", alt: "Alt", file: "Snapwright-windows-x64-setup.exe" },
-    linux: { short: "Linux", label: "Download for Linux", sub: "AppImage · x86_64", mod: "Ctrl", alt: "Alt", file: "Snapwright-linux-x86_64.AppImage" }
+    linux: { short: "Linux", label: "Download for Linux", sub: "Installs the latest AppImage, checks its SHA-256, adds a launcher and the snapwright CLI. No sudo.", mod: "Ctrl", alt: "Alt", file: "Snapwright-linux-x86_64.AppImage" }
   };
 
   function $(sel, root) { return (root || document).querySelector(sel); }
@@ -34,6 +34,21 @@
   setText("[data-mod]", P.mod);
   setText("[data-alt]", P.alt);
   $$("[data-dl-href]").forEach(function (el) { el.href = LATEST + P.file; });
+  // Linux gets the one-line installer (install.sh) in place of a file, as on Switchyard's site.
+  if (plat === "linux") {
+    $$("[data-dl-href]").forEach(function (el) { el.hidden = true; });
+    $$("[data-linux-cmd]").forEach(function (el) { el.hidden = false; });
+  }
+  $$("[data-copy]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = btn.parentNode.querySelector("code").textContent;
+      var done = function () {
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+  });
   $$("[data-platform]").forEach(function (el) {
     el.classList.toggle("mine", el.getAttribute("data-platform") === plat);
   });
