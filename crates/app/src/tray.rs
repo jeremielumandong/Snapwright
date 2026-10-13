@@ -1,4 +1,4 @@
-//! The tray (menu bar) icon: Capture, Record, Open captures folder, Theme, Quit.
+//! The tray (menu bar) icon: Capture, Record, Open captures folder, Theme, updates, Quit.
 //!
 //! macOS and Windows use the native status item; Linux uses StatusNotifierItem over D-Bus
 //! (`tray-icon`'s `ksni` backend), so no GTK is needed. Menu clicks arrive on a platform
@@ -25,6 +25,7 @@ pub enum Action {
     OpenLibrary,
     OpenFolder,
     Theme(Choice),
+    Update,
     Quit,
 }
 
@@ -34,6 +35,7 @@ pub struct Tray {
     record: MenuItem,
     record_gif: MenuItem,
     themes: Vec<(Choice, CheckMenuItem)>,
+    update: MenuItem,
     labels: Labels,
 }
 
@@ -49,6 +51,12 @@ impl Tray {
                 .set_text(with_shortcut("Record screen", self.labels.record.as_ref()));
             self.record_gif.set_enabled(true);
         }
+    }
+
+    /// Shows what the updater is doing (`crate::updates`).
+    pub fn set_update(&self, text: &str, enabled: bool) {
+        self.update.set_text(text);
+        self.update.set_enabled(enabled);
     }
 }
 
@@ -70,6 +78,7 @@ const ID_RECORD: &str = "record";
 const ID_RECORD_GIF: &str = "record-gif";
 const ID_OPEN: &str = "open-folder";
 const ID_LIBRARY: &str = "library";
+const ID_UPDATE: &str = "update";
 const ID_QUIT: &str = "quit";
 const ID_THEME_PREFIX: &str = "theme-";
 
@@ -144,6 +153,7 @@ pub fn create(
         true,
         None,
     );
+    let update = MenuItem::with_id(ID_UPDATE, "Check for updates", true, None);
     menu.append_items(&[
         &MenuItem::with_id(
             ID_CAPTURE,
@@ -166,6 +176,7 @@ pub fn create(
         &MenuItem::with_id(ID_OPEN, "Open captures folder", true, None),
         &theme_menu,
         &PredefinedMenuItem::separator(),
+        &update,
         &MenuItem::with_id(ID_QUIT, "Quit Snapwright", true, None),
     ])?;
 
@@ -199,6 +210,7 @@ pub fn create(
             record,
             record_gif,
             themes,
+            update,
             labels: labels.clone(),
         },
         rx,
@@ -214,6 +226,7 @@ fn action_for(id: &MenuId) -> Option<Action> {
         ID_RECORD_GIF => Some(Action::RecordGif),
         ID_LIBRARY => Some(Action::OpenLibrary),
         ID_OPEN => Some(Action::OpenFolder),
+        ID_UPDATE => Some(Action::Update),
         ID_QUIT => Some(Action::Quit),
         other => other
             .strip_prefix(ID_THEME_PREFIX)
@@ -287,6 +300,7 @@ mod tests {
             action_for(&MenuId::new(ID_LIBRARY)),
             Some(Action::OpenLibrary)
         );
+        assert_eq!(action_for(&MenuId::new(ID_UPDATE)), Some(Action::Update));
         assert_eq!(action_for(&MenuId::new(ID_QUIT)), Some(Action::Quit));
         assert_eq!(
             action_for(&MenuId::new("theme-omarchy")),

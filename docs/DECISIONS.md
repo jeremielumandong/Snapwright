@@ -252,6 +252,28 @@ MIT/Apache). Nothing is sent anywhere.
   it; it waits for a quiet second, then reads pending captures newest first, which also
   backfills an existing library. `T` in the overlay sends the selection to the same worker
   ahead of the queue and puts the text on the clipboard.
+
+## 2026-10-13: In-app updates, ported from Switchyard
+
+Jeremie asked for auto-update like Switchyard's. `crates/app/src/update.rs` is Switchyard's
+`switchyard-core::update` with the names changed, and `updates.rs` its UI state. Differences:
+
+- Blocking `ureq` (already used for the OCR models) on GPUI's background executor, not
+  `reqwest` on tokio; Snapwright has no tokio runtime. No progress or cancel. Like
+  Switchyard it trusts the OS certificate store (ureq's `platform-verifier`), so it works
+  behind TLS-inspecting proxies. Redirects are followed by hand, https only: ureq's own
+  redirect handling failed to read GitHub's chunked 302 body through a proxy.
+- No minisign check: Snapwright has no update key (see the release builds entry). Integrity
+  is the SHA-256 GitHub records for each asset, or the `.sha256` file beside it, over an
+  HTTPS download from the github.com release.
+- No settings window yet, so the UI is one tray item: "Check for updates", then
+  "Downloading…", then "Restart to update to X" (AppImage replaced in place, Windows
+  installer run after exit) or "Install Snapwright X" (macOS opens the verified DMG). Copies
+  that can't update themselves get "Download Snapwright X", which opens the release page.
+- The app is resident, so release builds check 30 s after launch and then once a day, not
+  only at startup. `SNAPWRIGHT_NO_UPDATE_CHECK` turns the automatic checks off. Restarting
+  waits while a recording runs.
+
 ## 2026-10-13: Hyprland shortcuts and following the Omarchy theme
 
 - Wayland has no global key grabs, so Ctrl+Shift+2 did nothing on Hyprland (Omarchy) unless
