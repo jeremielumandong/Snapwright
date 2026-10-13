@@ -5,3 +5,4 @@
 .DS_Store
 /dist
 !site/img/*.png
+!site/img/**/*.png

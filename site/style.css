@@ -11,9 +11,20 @@
   --blue-2: #4a8fe6;
   --blue-3: #7cb0f0;
   --red: #d93a3f;
+  --on-accent: #ffffff;
+  --header-bg: rgba(244, 241, 234, .92);
+  --night-bg: #17160f;
+  --night-head: #f4f1ea;
   --night-text: #cdc8bb;
   --night-muted: #a9a497;
   --night-rule: #3a3830;
+  --pre-bg: #0f0e0a;
+  --pre-fg: #e8e4d8;
+  --pre-dim: #7d786b;
+  --dock-bg: rgba(24, 24, 29, .94);
+  --dock-line: rgba(255, 255, 255, .12);
+  --dock-fg: #ffffff;
+  --dock-fg3: #8b8b94;
   --mono: "JetBrains Mono", ui-monospace, monospace;
   --gutter: clamp(20px, 4vw, 48px);
 }
@@ -23,6 +34,7 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--paper);
+  transition: background .25s, color .25s;
   color: var(--ink);
   font: 17px/1.55 "Schibsted Grotesk", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -31,7 +43,7 @@ body {
 img { max-width: 100%; height: auto; display: block; }
 a { color: var(--ink); text-decoration: none; }
 a:hover { color: var(--blue); }
-::selection { background: var(--blue); color: #fff; }
+::selection { background: var(--blue); color: var(--on-accent); }
 figure { margin: 0; }
 [hidden] { display: none !important; }
 kbd {
@@ -47,7 +59,7 @@ kbd {
   color: var(--ink);
   transition: background .15s, color .15s, border-color .15s;
 }
-.armed kbd { background: var(--blue); color: #fff; border-color: var(--blue); }
+.armed kbd { background: var(--blue); color: var(--on-accent); border-color: var(--blue); }
 
 .wrap { max-width: 1320px; margin: 0 auto; padding: 0 var(--gutter); }
 .mono { font-family: var(--mono); }
@@ -56,7 +68,7 @@ kbd {
 /* Header */
 .site-header {
   position: sticky; top: 0; z-index: 20;
-  background: rgba(244, 241, 234, .92);
+  background: var(--header-bg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--ink);
@@ -75,7 +87,7 @@ kbd {
   background: var(--ink); color: var(--paper); border-radius: 999px; font-size: 14px; font-weight: 600;
   white-space: nowrap;
 }
-.pill:hover { background: var(--blue); color: #fff; }
+.pill:hover { background: var(--blue); color: var(--on-accent); }
 .pill span { font: 400 12px var(--mono); opacity: .75; }
 
 /* Hero */
@@ -104,7 +116,7 @@ h1 {
 .sel-word i:nth-child(4) { right: -5px; bottom: -5px; }
 .sel-word b {
   position: absolute; left: -2px; bottom: 100%; margin-bottom: 10px; padding: 4px 8px;
-  background: var(--blue); color: #fff; font: 500 clamp(11px, 1vw, 14px)/1 var(--mono);
+  background: var(--blue); color: var(--on-accent); font: 500 clamp(11px, 1vw, 14px)/1 var(--mono);
   letter-spacing: 0; white-space: nowrap;
 }
 
@@ -121,7 +133,7 @@ h1 {
   display: inline-flex; align-items: center; gap: 14px; padding: 18px 26px; background: var(--ink);
   color: var(--paper); border-radius: 999px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em;
 }
-.big-btn:hover { background: var(--blue); color: #fff; }
+.big-btn:hover { background: var(--blue); color: var(--on-accent); }
 .big-btn span { font-size: 20px; }
 /* One-line Linux installer with a copy button. */
 .install-cmd {
@@ -136,12 +148,12 @@ h1 {
   flex: none; font: 500 12px/1 var(--mono); padding: 8px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
 }
-.install-cmd button:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+.install-cmd button:hover { background: var(--blue); border-color: var(--blue); color: var(--on-accent); }
 .cta .install-cmd { width: min(560px, calc(100vw - 2 * var(--gutter))); }
-.download .install-cmd { border-color: var(--night-rule); background: #0f0e0a; }
-.download .install-cmd code { color: #e8e4d8; }
-.download .install-cmd button { background: var(--paper); color: var(--ink); border-color: var(--paper); }
-.download .install-cmd button:hover { background: var(--blue-2); border-color: var(--blue-2); color: #fff; }
+.download .install-cmd { border-color: var(--night-rule); background: var(--pre-bg); }
+.download .install-cmd code { color: var(--pre-fg); }
+.download .install-cmd button { background: var(--night-head); color: var(--night-bg); border-color: var(--night-head); }
+.download .install-cmd button:hover { background: var(--blue-2); border-color: var(--blue-2); color: var(--on-accent); }
 .platform .install-cmd { grid-column: 1 / -1; }
 .cta-sub { font: 400 12.5px/1.4 var(--mono); color: var(--muted); }
 .cta-sub a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
@@ -166,7 +178,7 @@ h1 {
   pointer-events: none;
 }
 .stage .sel span {
-  position: absolute; left: -1px; top: -25px; padding: 3px 7px; background: var(--ink); color: #fff;
+  position: absolute; left: -1px; top: -25px; padding: 3px 7px; background: var(--ink); color: var(--paper);
   font: 500 12px/1.3 var(--mono); white-space: nowrap;
 }
 .stage .sel.low span { top: 4px; }
@@ -198,9 +210,7 @@ h1 {
   color: var(--paper); font: 400 11.5px/1.3 var(--mono);
 }
 .preview .foot span:last-child { padding: 2px 6px; border: 1px solid var(--muted); border-radius: 4px; }
-.crop {
-  height: 100%; max-width: 100%; background-image: url(img/library.png); background-repeat: no-repeat;
-}
+.crop { height: 100%; max-width: 100%; background-repeat: no-repeat; }
 
 .demo-lib {
   display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; padding: 16px 0;
@@ -272,23 +282,23 @@ figcaption.fig b { color: var(--ink); font-weight: 500; white-space: nowrap; }
 .next b { color: var(--ink); font-weight: 500; }
 
 /* Download */
-.download { background: var(--ink); color: var(--paper); scroll-margin-top: 60px; }
+.download { background: var(--night-bg); color: var(--night-head); scroll-margin-top: 60px; }
 .download > .wrap { padding-top: clamp(72px, 9vw, 128px); padding-bottom: clamp(72px, 9vw, 128px); }
 .download .label { font-size: 13px; line-height: 1; color: var(--night-muted); }
-.download h2 { margin-top: 20px; font-size: clamp(52px, 9vw, 136px); line-height: 0.92; letter-spacing: -0.055em; color: var(--paper); }
+.download h2 { margin-top: 20px; font-size: clamp(52px, 9vw, 136px); line-height: 0.92; letter-spacing: -0.055em; color: var(--night-head); }
 .download .lede-row { margin: 40px 0 56px; }
 .download .lede { flex-basis: 380px; max-width: 560px; font-size: 19px; color: var(--night-text); }
 .download .cta { gap: 12px; }
-.download .big-btn { background: var(--paper); color: var(--ink); }
-.download .big-btn:hover { background: var(--blue-2); color: #fff; }
+.download .big-btn { background: var(--night-head); color: var(--night-bg); }
+.download .big-btn:hover { background: var(--blue-2); color: var(--on-accent); }
 .download .cta-sub { color: var(--night-muted); }
-.platforms { border-top: 1px solid var(--paper); }
+.platforms { border-top: 1px solid var(--night-head); }
 .platform {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 32px;
   align-items: baseline; padding: 22px 0; border-bottom: 1px solid var(--night-rule); color: var(--night-text);
 }
 .platform .name { display: flex; align-items: center; gap: 12px; font-weight: 800; font-size: 28px; letter-spacing: -0.03em; }
-.platform.mine .name { color: var(--paper); }
+.platform.mine .name { color: var(--night-head); }
 .platform .yours {
   display: none; font: 500 11px/1 var(--mono); letter-spacing: 0.04em; padding: 5px 7px;
   border: 1px solid var(--blue-2); color: var(--blue-3); border-radius: 4px;
@@ -296,18 +306,62 @@ figcaption.fig b { color: var(--ink); font-weight: 500; white-space: nowrap; }
 .platform.mine .yours { display: inline-block; }
 .platform .api { font: 400 13px/1.5 var(--mono); }
 .platform .note { font-size: 15.5px; }
-.platform a { justify-self: start; font: 500 13px/1.4 var(--mono); color: var(--paper); border-bottom: 1px solid var(--paper); }
+.platform a { justify-self: start; font: 500 13px/1.4 var(--mono); color: var(--night-head); border-bottom: 1px solid var(--night-head); }
 .platform a:hover { color: var(--blue-3); }
 .source { display: flex; flex-wrap: wrap; gap: 24px 64px; margin-top: 64px; }
 .source > div { flex: 1 1 280px; max-width: 380px; }
-.source h3 { margin: 0 0 10px; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; color: var(--paper); }
+.source h3 { margin: 0 0 10px; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; color: var(--night-head); }
 .source p { margin: 0; color: var(--night-text); font-size: 15.5px; }
-.source p code { font: 400 13px var(--mono); color: var(--paper); }
+.source p code { font: 400 13px var(--mono); color: var(--night-head); }
 .source pre {
-  flex: 1.6 1 420px; margin: 0; padding: 22px 24px; border: 1px solid var(--night-rule); background: #0f0e0a;
-  color: #e8e4d8; font: 400 14px/1.75 var(--mono); overflow-x: auto;
+  flex: 1.6 1 420px; margin: 0; padding: 22px 24px; border: 1px solid var(--night-rule); background: var(--pre-bg);
+  color: var(--pre-fg); font: 400 14px/1.75 var(--mono); overflow-x: auto;
 }
-.source pre i { font-style: normal; color: #7d786b; }
+.source pre i { font-style: normal; color: var(--pre-dim); }
+
+/* Theme: the header button and the dock it opens (theme.js). */
+.theme-btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--ink); font: 500 13px/1 var(--mono); letter-spacing: 0.02em; white-space: nowrap;
+}
+.theme-btn:hover { color: var(--blue); }
+.theme-dot {
+  width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--ink);
+  background: linear-gradient(135deg, var(--paper) 50%, var(--blue) 50%);
+}
+.theme-dock {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 50;
+  width: min(1100px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  border-radius: 14px; background: var(--dock-bg); border: 1px solid var(--dock-line);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .35); color: var(--dock-fg);
+  font: 12px/1.3 Geist, system-ui, sans-serif;
+}
+.dock-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dock-head b { font-weight: 600; font-size: 13px; }
+.dock-name, .dock-keys { color: var(--dock-fg3); }
+.dock-keys { display: flex; align-items: center; gap: 6px; }
+.dock-keys kbd {
+  min-width: 20px; padding: 3px 5px; font: 11px/1 system-ui, sans-serif; border-radius: 5px;
+  background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .14); color: var(--dock-fg);
+}
+.dock-close {
+  margin-left: auto; width: 26px; height: 26px; border: 0; border-radius: 6px; cursor: pointer;
+  background: rgba(255, 255, 255, .08); color: var(--dock-fg); font-size: 16px; line-height: 1;
+}
+.dock-chips { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding-bottom: 8px; }
+.chip {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; padding: 5px; border: 0; border-radius: 9px;
+  background: transparent; cursor: pointer; color: var(--dock-fg3); font: 500 11px/1.2 system-ui, sans-serif; text-align: left;
+}
+.chip.on { box-shadow: 0 0 0 2px var(--blue); color: var(--dock-fg); }
+.chip .swatch {
+  width: 84px; height: 44px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .14); padding: 7px;
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.chip .swatch i { width: 44px; height: 5px; border-radius: 3px; }
+.chip .swatch > span { display: flex; gap: 4px; }
+.chip .swatch u { width: 10px; height: 10px; border-radius: 50%; }
+.chip-name { padding: 0 2px; white-space: nowrap; }
 
 /* Four fixed columns when they fit, so the full-width installer row keeps the others' grid. */
 @media (min-width: 960px) { .platform { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

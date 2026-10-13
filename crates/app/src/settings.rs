@@ -67,7 +67,12 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        for theme in [None, Some(Choice::Omarchy), Some(Choice::Light)] {
+        for theme in [
+            None,
+            Some(Choice::Omarchy),
+            Some(Choice::Light),
+            Some(Choice::Named("rose-pine")),
+        ] {
             let s = Settings { theme };
             assert_eq!(parse(&render(&s)), s);
         }

@@ -12,6 +12,7 @@ use tray_icon::menu::{
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::hotkey;
+use crate::omarchy;
 use crate::theme::Choice;
 
 /// What the user picked from the tray menu.
@@ -126,8 +127,7 @@ pub fn create(
     omarchy: bool,
 ) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
     let menu = Menu::new();
-    let themes: Vec<(Choice, CheckMenuItem)> = Choice::ALL
-        .into_iter()
+    let themes: Vec<(Choice, CheckMenuItem)> = Choice::all()
         .filter(|c| omarchy || *c != Choice::Omarchy || theme == Choice::Omarchy)
         .map(|c| {
             let id = format!("{ID_THEME_PREFIX}{}", c.key());
@@ -138,7 +138,11 @@ pub fn create(
         })
         .collect();
     let theme_menu = Submenu::with_id("theme", "Theme", true);
-    for (_, item) in &themes {
+    for (c, item) in &themes {
+        // The bundled themes under a rule, after System, Light, Dark and Follow Omarchy.
+        if matches!(c, Choice::Named(id) if *id == omarchy::BUNDLED[0].id) {
+            theme_menu.append(&PredefinedMenuItem::separator())?;
+        }
         theme_menu.append(item)?;
     }
     let record = MenuItem::with_id(
@@ -305,6 +309,10 @@ mod tests {
         assert_eq!(
             action_for(&MenuId::new("theme-omarchy")),
             Some(Action::Theme(Choice::Omarchy))
+        );
+        assert_eq!(
+            action_for(&MenuId::new("theme-tokyo-night")),
+            Some(Action::Theme(Choice::Named("tokyo-night")))
         );
         assert_eq!(action_for(&MenuId::new("theme-sepia")), None);
         assert_eq!(action_for(&MenuId::new("other")), None);

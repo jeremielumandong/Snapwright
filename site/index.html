@@ -12,7 +12,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=themes">
+<script src="theme.js"></script>
 </head>
 <body>
 <header class="site-header"><div class="wrap">
@@ -24,6 +25,7 @@
     <a href="#download">Download</a>
   </nav>
   <div class="header-end">
+    <button type="button" class="theme-btn" data-theme-toggle aria-expanded="false"><span class="theme-dot" aria-hidden="true"></span>Theme</button>
     <a class="gh" href="https://github.com/jeremielumandong/Snapwright">GitHub ↗</a>
     <a class="pill" href="#download">Download<span data-os-short>macOS</span></a>
   </div>
@@ -54,7 +56,7 @@
       <span class="hint">Press <kbd data-mod>⌘</kbd><kbd>Shift</kbd><kbd>2</kbd> or just drag across the image</span>
     </div>
     <div class="stage" id="stage">
-      <img src="img/library.png" alt="The Snapwright library window, used here as a desktop to capture from" draggable="false" width="1200" height="760">
+      <img src="img/themes/snapwright/library.png" data-shot="library" alt="The Snapwright library window, used here as a desktop to capture from" draggable="false" width="1200" height="760">
       <div class="dim" hidden></div>
       <div class="sel" hidden><span></span></div>
       <div class="ch-h" hidden></div>
@@ -117,8 +119,8 @@
       </div>
     </div>
     <figure>
-      <div><img src="img/editor.png" alt="The editor with a numbered step, an arrow, text and a blurred value" width="1064" height="560" loading="lazy"></div>
-      <figcaption class="fig"><b>Fig. 3</b><span>Numbered steps, an arrow, a label, and a blurred number. Four keys.</span></figcaption>
+      <div><img src="img/themes/snapwright/editor.png" data-shot="editor" alt="The editor with a box, numbered steps, an arrow and a label on a dashboard" width="1124" height="660" loading="lazy"></div>
+      <figcaption class="fig"><b>Fig. 3</b><span>A box, numbered steps, an arrow and a label. Four keys.</span></figcaption>
     </figure>
   </article>
 
@@ -135,7 +137,7 @@
       </div>
     </div>
     <figure>
-      <div><img src="img/library.png" alt="The library: a grid of captures with search, tags and details" width="1200" height="760" loading="lazy"></div>
+      <div><img src="img/themes/snapwright/library.png" data-shot="library" alt="The library: a grid of captures with search, tags and details" width="1200" height="760" loading="lazy"></div>
       <figcaption class="fig"><b>Fig. 4</b><span>Every capture keeps its app, window title, size, time and text. Tags and notes are yours.</span></figcaption>
     </figure>
   </article>
@@ -216,6 +218,6 @@
   <div class="wordmark" aria-hidden="true">Snapwright</div>
 </footer>
 
-<script src="site.js?v=0.2.1-linux" defer></script>
+<script src="site.js?v=0.2.1-themes" defer></script>
 </body>
 </html>
