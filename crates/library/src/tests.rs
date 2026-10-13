@@ -410,7 +410,13 @@ fn version_1_libraries_upgrade_in_place() {
     // Turn the database back into a version 1 library.
     let db = Connection::open(dir.path().join("library.sqlite3")).unwrap();
     db.execute_batch(
-        "DROP INDEX captures_edit_hash;
+        "ALTER TABLE captures DROP COLUMN ocr_hash;
+         DROP INDEX captures_video_hash;
+         ALTER TABLE captures DROP COLUMN video_hash;
+         ALTER TABLE captures DROP COLUMN video_ext;
+         ALTER TABLE captures DROP COLUMN video_bytes;
+         ALTER TABLE captures DROP COLUMN duration_ms;
+         DROP INDEX captures_edit_hash;
          ALTER TABLE captures DROP COLUMN edit_hash;
          ALTER TABLE captures DROP COLUMN edit_width;
          ALTER TABLE captures DROP COLUMN edit_height;
@@ -424,4 +430,47 @@ fn version_1_libraries_upgrade_in_place() {
     assert_eq!(lib.get(id).unwrap().meta.app, "Safari");
     edit(&mut lib, id, [9, 9, 9], "{}");
     assert!(lib.get(id).unwrap().edit.is_some());
+    assert_eq!(lib.get(id).unwrap().video, None);
+}
+
+#[test]
+fn recordings_keep_their_video_beside_the_poster() {
+    let mut f = library();
+    let clip = f._dir.path().join("Clip.MP4");
+    std::fs::write(&clip, b"not really a movie").unwrap();
+    let (png, rgba) = image(64, 36, [9, 9, 9]);
+    let id = f
+        .lib
+        .add_recording(&NewRecording {
+            poster: NewCapture {
+                png: &png,
+                rgba: &rgba,
+                width: 64,
+                height: 36,
+                meta: meta("Editor", "demo"),
+            },
+            video: &clip,
+            duration_ms: 4200,
+        })
+        .unwrap();
+    let rec = f.lib.get(id).unwrap();
+    let video = rec.video.clone().expect("a recording");
+    assert_eq!(
+        (video.ext.as_str(), video.bytes, video.duration_ms),
+        ("mp4", 18, 4200)
+    );
+    let stored = f.lib.video_path_of(&rec).unwrap();
+    assert_eq!(std::fs::read(&stored).unwrap(), b"not really a movie");
+    assert!(clip.exists(), "the user's file stays where it was");
+    assert!(
+        f.lib.thumb_path_of(&rec).exists(),
+        "the poster is a normal capture"
+    );
+    let plain = add(&mut f.lib, 1, [1, 2, 3], meta("A", "b"));
+    assert_eq!(f.lib.get(plain).unwrap().video, None);
+
+    f.lib.trash(id).unwrap();
+    f.lib.purge_trash().unwrap();
+    assert!(!stored.exists(), "purging removes the stored video");
+    assert!(clip.exists());
 }

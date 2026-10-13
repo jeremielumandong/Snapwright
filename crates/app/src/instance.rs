@@ -18,6 +18,8 @@ pub enum Request {
     CaptureIn(u32),
     Library,
     EditLatest,
+    Record,
+    RecordGif,
 }
 
 impl Request {
@@ -28,6 +30,8 @@ impl Request {
             Self::CaptureIn(n) => format!("capture-in {n}"),
             Self::Library => "library".into(),
             Self::EditLatest => "edit-latest".into(),
+            Self::Record => "record".into(),
+            Self::RecordGif => "record-gif".into(),
         }
     }
 
@@ -37,6 +41,8 @@ impl Request {
             "repeat" => Self::RepeatLast,
             "library" => Self::Library,
             "edit-latest" => Self::EditLatest,
+            "record" => Self::Record,
+            "record-gif" => Self::RecordGif,
             other => Self::CaptureIn(other.strip_prefix("capture-in ")?.parse().ok()?),
         })
     }

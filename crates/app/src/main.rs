@@ -14,6 +14,7 @@ mod library_view;
 mod ocr;
 mod output;
 mod overlay;
+mod recording;
 mod selection;
 mod session;
 mod theme;
@@ -24,6 +25,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use futures::StreamExt as _;
+use snapwright_record::Format;
 use tracing_subscriber::EnvFilter;
 
 #[cfg(target_os = "linux")]
@@ -38,6 +40,8 @@ enum Request {
     CaptureIn(u32),
     Library,
     EditLatest,
+    Record,
+    RecordGif,
 }
 
 /// `--capture-now` starts a capture as soon as the app is up, or in the running app (bind it
@@ -51,6 +55,10 @@ const LIBRARY_ARG: &str = "--library";
 const EDIT_LATEST_ARG: &str = "--edit-latest";
 /// `--capture-in=N` starts a capture after an N-second countdown.
 const CAPTURE_IN_ARG: &str = "--capture-in=";
+/// `--record` starts recording the screen to MP4 (or stops a recording in progress).
+const RECORD_ARG: &str = "--record";
+/// `--record-gif` does the same for a GIF.
+const RECORD_GIF_ARG: &str = "--record-gif";
 /// Delay for the tray's "Capture in 3 seconds".
 const TRAY_DELAY_SECS: u32 = 3;
 
@@ -112,6 +120,8 @@ fn main() -> Result<()> {
                     let labels = tray::Labels {
                         capture: hotkeys.label(hotkey::Action::Capture).map(str::to_owned),
                         repeat: hotkeys.label(hotkey::Action::RepeatLast).map(str::to_owned),
+                        record: hotkeys.label(hotkey::Action::Record).map(str::to_owned),
+                        record_gif: hotkeys.label(hotkey::Action::RecordGif).map(str::to_owned),
                     };
                     cx.set_global(hotkeys);
                     cx.spawn(async move |cx| {
@@ -119,6 +129,12 @@ fn main() -> Result<()> {
                             cx.update(|cx| match action {
                                 hotkey::Action::Capture => session::start(pressed_at, cx),
                                 hotkey::Action::RepeatLast => session::repeat_last(pressed_at, cx),
+                                hotkey::Action::Record => {
+                                    recording::toggle(Format::Mp4, pressed_at, cx)
+                                }
+                                hotkey::Action::RecordGif => {
+                                    recording::toggle(Format::Gif, pressed_at, cx)
+                                }
                             });
                         }
                     })
@@ -173,6 +189,12 @@ fn requests(args: impl Iterator<Item = String>) -> Vec<Request> {
     if has(EDIT_LATEST_ARG) {
         out.push(Request::EditLatest);
     }
+    if has(RECORD_ARG) {
+        out.push(Request::Record);
+    }
+    if has(RECORD_GIF_ARG) {
+        out.push(Request::RecordGif);
+    }
     out
 }
 
@@ -183,6 +205,8 @@ fn handle(request: Request, at: Instant, cx: &mut gpui_kit::App) {
         Request::CaptureIn(seconds) => countdown::start(seconds, cx),
         Request::Library => library_view::open(cx),
         Request::EditLatest => library_view::edit_latest(cx),
+        Request::Record => recording::toggle(Format::Mp4, at, cx),
+        Request::RecordGif => recording::toggle(Format::Gif, at, cx),
     }
 }
 
@@ -191,6 +215,8 @@ fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
         tray::Action::Capture => session::start(Instant::now(), cx),
         tray::Action::CaptureDelayed => countdown::start(TRAY_DELAY_SECS, cx),
         tray::Action::RepeatLast => session::repeat_last(Instant::now(), cx),
+        tray::Action::Record => recording::toggle(Format::Mp4, Instant::now(), cx),
+        tray::Action::RecordGif => recording::toggle(Format::Gif, Instant::now(), cx),
         tray::Action::OpenLibrary => library_view::open(cx),
         tray::Action::OpenFolder => match output::captures_dir() {
             Ok(dir) => {

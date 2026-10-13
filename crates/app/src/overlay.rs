@@ -2,7 +2,7 @@
 //! frame. Hover highlights a window, a click takes it, a drag selects a region; see
 //! [`crate::selection`] for the whole interaction. A loupe beside the pointer shows the pixels
 //! under it and their colour; `C` copies that colour as hex, `T` the text in the selection (or
-//! the hovered window). Esc cancels.
+//! the hovered window). Esc cancels. In record mode the selection is the area to record.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,8 +15,10 @@ use gpui_kit::{
 };
 use snapwright_capture::{Frame, Rect};
 
+use gpui_kit::prelude::FluentBuilder as _;
+
 use crate::selection::{Arrow, Outcome, Selector};
-use crate::session::{self, SnapTarget};
+use crate::session::{self, Mode, SnapTarget};
 use crate::theme::{self, hud};
 
 /// Loupe grid: cells per side (odd, so one sits under the pointer) and their size.
@@ -38,6 +40,7 @@ pub struct Overlay {
     focus: FocusHandle,
     selector: Selector,
     targets: Vec<SnapTarget>,
+    mode: Mode,
     viewport: Size<Pixels>,
     pressed_at: Instant,
     shown: bool,
@@ -48,6 +51,7 @@ impl Overlay {
     pub fn new(
         frame: Frame,
         targets: Vec<SnapTarget>,
+        mode: Mode,
         pressed_at: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -71,6 +75,7 @@ impl Overlay {
             focus,
             selector: Selector::new(width, height, targets.iter().map(|t| t.rect).collect()),
             targets,
+            mode,
             viewport: size(px(1.), px(1.)),
             pressed_at,
             shown: false,
@@ -135,6 +140,15 @@ impl Overlay {
     }
 
     fn deliver(&mut self, r: Rect, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.mode, Mode::Record(_)) {
+            let Some(r) = r.intersect(&Rect::new(0, 0, self.width, self.height)) else {
+                return;
+            };
+            let meta =
+                session::describe(r, self.width, self.height, &self.targets, self.display_id);
+            session::deliver_recording(self.display_id, r, meta, window, cx);
+            return;
+        }
         let Some((r, frame)) = self.crop(r) else {
             return;
         };
@@ -183,7 +197,7 @@ impl Overlay {
                 let outcome = self.selector.confirm();
                 self.apply(outcome, window, cx);
             }
-            "c" => {
+            "c" if self.mode == Mode::Capture => {
                 if let Some(hex) = self
                     .selector
                     .cursor()
@@ -195,7 +209,9 @@ impl Overlay {
                     session::finish(window, cx);
                 }
             }
-            "t" if !mods.control && !mods.platform => self.copy_text(window, cx),
+            "t" if !mods.control && !mods.platform && !matches!(self.mode, Mode::Record(_)) => {
+                self.copy_text(window, cx)
+            }
             _ => {}
         }
     }
@@ -344,12 +360,35 @@ impl Overlay {
             .shadow(vec![shadow()])
             .text_size(px(12.))
             .text_color(hud::fg2());
+        let recording = matches!(self.mode, Mode::Record(_));
         let bar = if self.selector.is_adjusting() {
             bar.child(theme::hud_hint(&["left", "right"], "Move"))
                 .child(theme::hud_hint(&["shift", "left"], "Resize"))
-                .child(theme::hud_hint(&["enter"], "Copy"))
-                .child(theme::hud_hint(&["T"], "Copy text"))
+                .child(theme::hud_hint(
+                    &["enter"],
+                    if recording { "Record" } else { "Copy" },
+                ))
+                .when(!recording, |bar| {
+                    bar.child(theme::hud_hint(&["T"], "Copy text"))
+                })
                 .child(theme::hud_hint(&["escape"], "Cancel"))
+        } else if recording {
+            let what = match self.mode {
+                Mode::Record(snapwright_record::Format::Gif) => "a GIF",
+                _ => "a video",
+            };
+            bar.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().size(px(8.)).rounded_full().bg(hud::record()))
+                    .child(format!(
+                        "Click a window or display, or drag a region, for {what}"
+                    )),
+            )
+            .child(theme::hud_hint(&["shift"], "Adjust"))
+            .child(theme::hud_hint(&["escape"], "Cancel"))
         } else {
             bar.child("Click a window or drag a region")
                 .child(theme::hud_hint(&["shift"], "Adjust"))

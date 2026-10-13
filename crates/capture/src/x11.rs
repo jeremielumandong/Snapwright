@@ -6,11 +6,13 @@
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::shm::{self, ConnectionExt as _};
+use x11rb::protocol::xfixes::ConnectionExt as _;
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ConnectionExt as _, ImageFormat, MapState, Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 
+use crate::cursor::{Cursor, CursorKind};
 use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
 
 fn err(api: &'static str, e: impl std::fmt::Display) -> CaptureError {
@@ -32,6 +34,8 @@ pub(crate) struct Backend {
     atoms: Option<Atoms>,
     shm: Option<ShmSegment>,
     shm_available: bool,
+    /// Whether XFixes can hand over the pointer image (for recordings).
+    xfixes: bool,
 }
 
 /// A SysV shared memory segment attached to both this process and the X server.
@@ -70,6 +74,12 @@ impl Backend {
             .flatten()
             .is_some()
             && !is_remote_display();
+        // XFixes must be told which version the client speaks before `GetCursorImage` works.
+        let xfixes = conn
+            .xfixes_query_version(4, 0)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .is_some();
         Ok(Self {
             conn,
             root,
@@ -77,6 +87,7 @@ impl Backend {
             atoms: None,
             shm: None,
             shm_available,
+            xfixes,
         })
     }
 
@@ -125,7 +136,43 @@ impl Backend {
         Ok(out)
     }
 
-    pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
+    pub(crate) fn capture(&mut self, display: &Display, cursor: bool) -> Result<Frame> {
+        let mut frame = self.capture_pixels(display)?;
+        if cursor && self.xfixes {
+            match self.cursor(display) {
+                Ok(c) => frame.draw_cursor(&c),
+                Err(e) => tracing::debug!(error = %e, "no pointer image"),
+            }
+        }
+        Ok(frame)
+    }
+
+    /// The pointer image placed in `display`'s frame.
+    fn cursor(&self, display: &Display) -> Result<Cursor> {
+        let image = self
+            .conn
+            .xfixes_get_cursor_image()
+            .map_err(|e| err("XFixesGetCursorImage", e))?
+            .reply()
+            .map_err(|e| err("XFixesGetCursorImage", e))?;
+        // Premultiplied 0xAARRGGBB words; their little-endian bytes read B, G, R, A.
+        let data = image
+            .cursor_image
+            .iter()
+            .flat_map(|px| px.to_le_bytes())
+            .collect();
+        Ok(Cursor {
+            kind: CursorKind::Premultiplied,
+            x: i32::from(image.x) - i32::from(image.xhot) - display.bounds.x,
+            y: i32::from(image.y) - i32::from(image.yhot) - display.bounds.y,
+            width: u32::from(image.width),
+            height: u32::from(image.height),
+            pitch: usize::from(image.width) * 4,
+            data,
+        })
+    }
+
+    fn capture_pixels(&mut self, display: &Display) -> Result<Frame> {
         let r = display
             .bounds
             .intersect(&self.screen)
