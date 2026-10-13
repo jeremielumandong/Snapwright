@@ -33,6 +33,7 @@ a { color: var(--ink); text-decoration: none; }
 a:hover { color: var(--blue); }
 ::selection { background: var(--blue); color: #fff; }
 figure { margin: 0; }
+[hidden] { display: none !important; }
 kbd {
   display: inline-block;
   font: 500 13px/1 var(--mono);
@@ -122,6 +123,26 @@ h1 {
 }
 .big-btn:hover { background: var(--blue); color: #fff; }
 .big-btn span { font-size: 20px; }
+/* One-line Linux installer with a copy button. */
+.install-cmd {
+  display: flex; align-items: center; gap: 10px; max-width: 100%; min-width: 0;
+  padding: 8px 8px 8px 16px; border: 1px solid var(--ink); border-radius: 10px; background: var(--paper-2);
+}
+.install-cmd code {
+  flex: 1 1 auto; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font: 400 13px/1.6 var(--mono); color: var(--ink);
+}
+.install-cmd button {
+  flex: none; font: 500 12px/1 var(--mono); padding: 8px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+}
+.install-cmd button:hover { background: var(--blue); border-color: var(--blue); color: #fff; }
+.cta .install-cmd { width: min(560px, calc(100vw - 2 * var(--gutter))); }
+.download .install-cmd { border-color: var(--night-rule); background: #0f0e0a; }
+.download .install-cmd code { color: #e8e4d8; }
+.download .install-cmd button { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+.download .install-cmd button:hover { background: var(--blue-2); border-color: var(--blue-2); color: #fff; }
+.platform .install-cmd { grid-column: 1 / -1; }
 .cta-sub { font: 400 12.5px/1.4 var(--mono); color: var(--muted); }
 .cta-sub a { color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 
@@ -287,6 +308,9 @@ figcaption.fig b { color: var(--ink); font-weight: 500; white-space: nowrap; }
   color: #e8e4d8; font: 400 14px/1.75 var(--mono); overflow-x: auto;
 }
 .source pre i { font-style: normal; color: #7d786b; }
+
+/* Four fixed columns when they fit, so the full-width installer row keeps the others' grid. */
+@media (min-width: 960px) { .platform { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* Footer */
 .site-footer { padding-top: 40px; padding-bottom: 28px; overflow: hidden; }
