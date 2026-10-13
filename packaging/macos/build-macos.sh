@@ -110,7 +110,14 @@ notarize() {
   local kc=()
   [[ -n "${MACOS_NOTARY_KEYCHAIN:-}" ]] && kc=(--keychain "$MACOS_NOTARY_KEYCHAIN")
   xcrun notarytool submit "$1" --keychain-profile "$MACOS_NOTARY_PROFILE" ${kc[@]+"${kc[@]}"} --wait
-  xcrun stapler staple "$1"
+  # Stapling downloads the ticket from Apple's CloudKit, which sometimes drops the connection.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    xcrun stapler staple "$1" && return 0
+    [[ $attempt -lt 5 ]] || die "stapler staple failed $attempt times"
+    log "stapler staple failed (attempt $attempt); retrying in $((attempt * 15)) s"
+    sleep $((attempt * 15))
+  done
 }
 
 BASENAME="$APP_NAME-$VERSION-macos-$ARCH"
