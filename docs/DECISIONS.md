@@ -291,3 +291,27 @@ Jeremie asked for auto-update like Switchyard's. `crates/app/src/update.rs` is S
   window palette; HUDs stay dark. With no saved choice, Omarchy machines start on Follow
   Omarchy. Nothing polls (idle CPU stays 0%): the theme is re-read on a Hyprland config reload
   and when a library or editor window comes to the front.
+
+## 2026-10-13: Omarchy themes in the app and on the site
+
+From the "Omarchy theme implementation" design handoff.
+
+- The app bundles 16 Omarchy themes (Tokyo Night through White, colours from each theme's
+  `colors.toml`) as `omarchy::BUNDLED`, listed under Theme in the tray after Match system,
+  Light, Dark and Follow Omarchy. On Omarchy, Follow Omarchy stays the default.
+- One mapping turns any Omarchy theme into the window palette, as the handoff specifies:
+  background is the window, `dark_background` the sidebar, `darker_background` the canvas,
+  `selection` the selected row, the brightest foreground the text, the accent the accent
+  (with the darkest shade as its text when the accent is light, white otherwise), red the
+  danger colour. Themes on disk that leave a shade out get one mixed from background and
+  foreground; a pale `bright_foreground` on a light theme (Aether's) falls back to
+  `foreground`. Secondary text is nudged only if it would drop below readable contrast.
+- The site has the same 17 themes (Snapwright's own look plus the 16) behind a Theme button
+  in the header, which opens the handoff's theme dock (chips, ← → to cycle), saved in
+  localStorage and settable with `?theme=`. The handoff's dock was always on screen; on the
+  real site it opens from the header so it doesn't cover the page.
+- The library and editor screenshots on the site are real app windows in each theme,
+  rendered by `scripts/site-shots.sh` from a sample dashboard
+  (`scripts/site-shots/northwind.html`) and a seeded library
+  (`snapwright-editor`'s `seed` example). The overlay, countdown and preview shots stay as
+  they are: those HUDs are always dark.

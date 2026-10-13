@@ -17,3 +17,4 @@ workspace = true
 
 [dev-dependencies]
 png.workspace = true
+snapwright-library.workspace = true

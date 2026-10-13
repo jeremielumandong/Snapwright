@@ -3,13 +3,14 @@
   "use strict";
 
   var IMG_W = 1200, IMG_H = 760;
-  // Regions of img/library.png the demo captures on its own: [x0, y0, x1, y1] as fractions.
+  // Regions of the library screenshot the demo captures on its own: [x0, y0, x1, y1] as
+  // fractions (img/themes/<theme>/library.png, from scripts/site-shots.sh).
   var REGIONS = [
-    [0.177, 0.565, 0.343, 0.815],
-    [0.744, 0.012, 0.99, 0.282],
-    [0.52, 0.335, 0.685, 0.56],
-    [0.005, 0.0, 0.165, 0.245],
-    [0.355, 0.07, 0.69, 0.32]
+    [0.195, 0.13, 0.362, 0.37],
+    [0.725, 0.035, 0.995, 0.29],
+    [0.367, 0.385, 0.53, 0.625],
+    [0.0, 0.0, 0.18, 0.31],
+    [0.539, 0.385, 0.703, 0.625]
   ];
   // Stable names the release workflows upload next to the versioned files
   // (scripts/upload-release-assets.py), so these always fetch the newest build.
@@ -98,8 +99,11 @@
     render();
   }
 
-  // Shows the region r of library.png in el, scaled to el's height.
+  // Shows the region r of the library screenshot (in the current theme) in el, scaled to
+  // el's height.
   function crop(el, r) {
+    var theme = window.SnapwrightTheme;
+    el.style.backgroundImage = "url(" + (theme ? theme.shot("library") : "img/themes/snapwright/library.png") + ")";
     el.style.aspectRatio = Math.round(r.w * IMG_W) + " / " + Math.max(1, Math.round(r.h * IMG_H));
     el.style.backgroundSize = (100 / r.w) + "% " + (100 / r.h) + "%";
     el.style.backgroundPosition = (r.w >= 0.999 ? 0 : (r.x / (1 - r.w)) * 100) + "% " + (r.h >= 0.999 ? 0 : (r.y / (1 - r.h)) * 100) + "%";
