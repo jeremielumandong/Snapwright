@@ -56,6 +56,7 @@ crates/
   ocr/      snapwright-ocr      on-device text recognition: Vision, Windows.Media.Ocr, ocrs (Linux)
   record/   snapwright-record   screen recording: paced capture, MP4 (OS encoders / ffmpeg) and GIF
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
+scripts/site-shots.sh           the site's app screenshots in every theme, under Xvfb
 packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
 install.sh                      Linux one-line installer: latest AppImage, checksum, launcher, CLI
 site/                           marketing site (static HTML, deployed by .github/workflows/pages.yml)
@@ -94,6 +95,9 @@ site/                           marketing site (static HTML, deployed by .github
   compositor. Screencopy waits for a repaint, so it times out while the display sleeps.
 - Theme choice (tray > Theme) lives in `settings.toml` in the config folder; "Follow Omarchy"
   reads `~/.local/state/omarchy/current/theme` (Omarchy 4) or `~/.config/omarchy/current/theme`.
+  The 16 bundled Omarchy themes (`omarchy::BUNDLED`) and `site/theme.js` share one list and
+  one colour mapping; change both together and re-run `scripts/site-shots.sh`, which renders
+  the site's library and editor screenshots in every theme (`site/img/themes/<id>/`).
 - Running the Xvfb scripts from a Wayland desktop needs `env -u WAYLAND_DISPLAY
   XDG_SESSION_TYPE=x11`, or the app and tests pick the Wayland backend.
 - GPUI: `window.remove_window()` through a window's own handle fails while that window is

@@ -31,6 +31,19 @@ pub struct OmarchyColors {
     pub accent: Option<u32>,
     /// Terminal colors 0–15.
     pub ansi: [u32; 16],
+    /// The window shades Omarchy 4 themes name; older themes leave them out and the palette
+    /// derives them.
+    pub shades: Shades,
+}
+
+/// Omarchy 4's extra `colors.toml` keys, which the palette uses as they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Shades {
+    pub selection: Option<u32>,
+    pub dark_background: Option<u32>,
+    pub darker_background: Option<u32>,
+    pub lighter_background: Option<u32>,
+    pub bright_foreground: Option<u32>,
 }
 
 /// The last Omarchy theme read, as a GPUI global.
@@ -264,6 +277,14 @@ fn from_colors_toml(src: &str) -> Option<OmarchyColors> {
         foreground: lookup(&pairs, "foreground")?,
         accent: lookup(&pairs, "accent"),
         ansi: complete_ansi(ansi),
+        shades: Shades {
+            selection: lookup(&pairs, "selection")
+                .or_else(|| lookup(&pairs, "selection_background")),
+            dark_background: lookup(&pairs, "dark_background"),
+            darker_background: lookup(&pairs, "darker_background"),
+            lighter_background: lookup(&pairs, "lighter_background"),
+            bright_foreground: lookup(&pairs, "bright_foreground"),
+        },
     })
 }
 
@@ -285,6 +306,7 @@ fn from_alacritty(src: &str) -> Option<OmarchyColors> {
         foreground: lookup(&pairs, "colors.primary.foreground")?,
         accent: None,
         ansi: complete_ansi(ansi),
+        shades: Shades::default(),
     })
 }
 
@@ -329,50 +351,149 @@ fn hsla(c: u32) -> Hsla {
     rgb(c).into()
 }
 
-/// The Snapwright palette for an Omarchy theme: its background is the window background,
-/// panels and the canvas are shaded from it, its accent (blue when it names none) is the
-/// accent, and its red, yellow and green are the status colors.
+/// The Snapwright palette for an Omarchy theme, as `docs/design/Omarchy Themes.dc.html`
+/// maps it (and `site/site.js` for the site): the theme's background is the window, its
+/// `dark_background` the sidebar and `darker_background` the canvas, its brightest
+/// foreground the text, its accent (blue when it names none) the accent, its red the danger
+/// color. Shades a theme leaves out are mixed from its background and foreground.
 pub fn build_palette(c: &OmarchyColors) -> Palette {
     let dark = !c.light;
-    let (s, fg, a) = (c.background, c.foreground, c.ansi);
+    let (bg, a, sh) = (c.background, c.ansi, c.shades);
+    // Some generated themes (Aether) name a pale `bright_foreground` on a light background;
+    // the text takes whichever foreground reads better.
+    let ink = sh
+        .bright_foreground
+        .filter(|b| ratio(*b, bg) >= ratio(c.foreground, bg))
+        .unwrap_or(c.foreground);
+    let toward_ink = |t: f32| mix(bg, ink, t);
     let shade = |t: f32| {
         if dark {
-            mix(s, 0, t)
+            mix(bg, 0, t)
         } else {
-            mix(s, fg, t * 0.3)
+            mix(bg, ink, t * 0.3)
         }
     };
-    let toward_fg = |t: f32| mix(s, fg, t);
+    let panel = sh.dark_background.unwrap_or_else(|| shade(0.25));
+    let canvas = sh.darker_background.unwrap_or_else(|| shade(0.45));
+    let lighter = sh.lighter_background.unwrap_or_else(|| toward_ink(0.08));
     let acc = c.accent.unwrap_or(a[4]);
-    let acc_fg = [s, fg, 0x000000, 0xffffff]
-        .into_iter()
-        .find(|t| ratio(*t, acc) >= 4.5)
-        .unwrap_or(if lum(acc) > 0.18 { 0x000000 } else { 0xffffff });
-    let text = |color: u32, min: f32| readable(color, s, fg, min);
+    let acc_fg = if lum(acc) > 0.4 { canvas } else { 0xffffff };
+    // Kept readable for themes whose foreground sits close to their background.
+    let text = |color: u32, min: f32| readable(color, bg, ink, min);
     Palette {
         dark,
-        bg: hsla(s),
-        panel: hsla(shade(0.14)),
-        canvas: hsla(shade(0.3)),
-        fg: hsla(fg),
-        fg2: hsla(text(mix(fg, s, 0.25), 4.5)),
-        fg3: hsla(text(mix(fg, s, 0.45), 3.0)),
-        line: hsla(toward_fg(0.1)),
-        line2: hsla(toward_fg(0.18)),
-        hover: hsla(toward_fg(0.06)),
-        sel: hsla(toward_fg(0.1)),
+        bg: hsla(bg),
+        panel: hsla(panel),
+        canvas: hsla(canvas),
+        fg: hsla(ink),
+        fg2: hsla(text(mix(ink, bg, 0.3), 4.5)),
+        fg3: hsla(text(mix(ink, bg, 0.5), 2.5)),
+        line: hsla(toward_ink(0.1)),
+        line2: hsla(toward_ink(0.18)),
+        hover: hsla(toward_ink(0.06)),
+        sel: hsla(sh.selection.unwrap_or_else(|| toward_ink(0.12))),
         accent: hsla(acc),
         accent_fg: hsla(acc_fg),
         accent_soft: Hsla {
-            a: if dark { 0.22 } else { 0.18 },
+            a: 0.22,
             ..hsla(acc)
         },
-        thumb: hsla(toward_fg(0.04)),
-        danger: hsla(text(a[1], 3.0)),
+        thumb: hsla(if dark { lighter } else { panel }),
+        danger: hsla(a[1]),
         warning: hsla(a[3]),
         success: hsla(a[2]),
     }
 }
+
+/// An Omarchy theme bundled with the app, so any desktop can use it. Colors from each
+/// theme's `colors.toml` in basecamp/omarchy, as the design handoff lists them.
+pub struct Bundled {
+    pub id: &'static str,
+    pub name: &'static str,
+    light: bool,
+    accent: u32,
+    selection: u32,
+    background: u32,
+    dark_background: u32,
+    darker_background: u32,
+    lighter_background: u32,
+    foreground: u32,
+    bright_foreground: u32,
+    red: u32,
+    yellow: u32,
+    green: u32,
+}
+
+impl Bundled {
+    pub fn colors(&self) -> OmarchyColors {
+        let mut ansi = [None; 16];
+        ansi[1] = Some(self.red);
+        ansi[2] = Some(self.green);
+        ansi[3] = Some(self.yellow);
+        ansi[4] = Some(self.accent);
+        OmarchyColors {
+            name: self.name.to_owned(),
+            light: self.light,
+            background: self.background,
+            foreground: self.foreground,
+            accent: Some(self.accent),
+            ansi: complete_ansi(ansi),
+            shades: Shades {
+                selection: Some(self.selection),
+                dark_background: Some(self.dark_background),
+                darker_background: Some(self.darker_background),
+                lighter_background: Some(self.lighter_background),
+                bright_foreground: Some(self.bright_foreground),
+            },
+        }
+    }
+
+    pub fn palette(&self) -> Palette {
+        build_palette(&self.colors())
+    }
+}
+
+/// Finds a bundled theme by id (`tokyo-night`).
+pub fn bundled(id: &str) -> Option<&'static Bundled> {
+    BUNDLED.iter().find(|t| t.id == id)
+}
+
+#[rustfmt::skip]
+macro_rules! theme {
+    (@light light) => { true };
+    (@light dark) => { false };
+    ($id:literal, $name:literal, $mode:ident, $accent:literal, $selection:literal, $bg:literal,
+     $dark:literal, $darker:literal, $lighter:literal, $fg:literal, $bright:literal,
+     $red:literal, $yellow:literal, $green:literal) => {
+        Bundled {
+            id: $id, name: $name, light: theme!(@light $mode),
+            accent: $accent, selection: $selection, background: $bg, dark_background: $dark,
+            darker_background: $darker, lighter_background: $lighter, foreground: $fg,
+            bright_foreground: $bright, red: $red, yellow: $yellow, green: $green,
+        }
+    };
+}
+
+/// The same list, in the same order, as `site/site.js`.
+#[rustfmt::skip]
+pub const BUNDLED: [Bundled; 16] = [
+    theme!("tokyo-night", "Tokyo Night", dark, 0x7aa2f7, 0x292e42, 0x1a1b26, 0x13141c, 0x0e0e14, 0x24283b, 0xa9b1d6, 0xc0caf5, 0xf7768e, 0xe0af68, 0x9ece6a),
+    theme!("catppuccin", "Catppuccin", dark, 0x89b4fa, 0x45475a, 0x1e1e2e, 0x161622, 0x101019, 0x313244, 0xcdd6f4, 0xcdd6f4, 0xf38ba8, 0xf9e2af, 0xa6e3a1),
+    theme!("catppuccin-latte", "Catppuccin Latte", light, 0x1e66f5, 0xccd0da, 0xeff1f5, 0xe3e4e8, 0xd7d8dc, 0xdce0e8, 0x4c4f69, 0x4c4f69, 0xd20f39, 0xdf8e1d, 0x40a02b),
+    theme!("ethereal", "Ethereal", dark, 0x7d82d9, 0x252e56, 0x060b1e, 0x040816, 0x030610, 0x131a3a, 0xffcead, 0xffcead, 0xed5b5a, 0xe9bb4f, 0x92a593),
+    theme!("everforest", "Everforest", dark, 0x7fbbb3, 0x3d484d, 0x2d353b, 0x21272c, 0x181d20, 0x343f44, 0xd3c6aa, 0xd3c6aa, 0xe67e80, 0xdbbc7f, 0xa7c080),
+    theme!("flexoki-light", "Flexoki Light", light, 0x205ea6, 0xcecdc3, 0xfffcf0, 0xf2efe4, 0xe5e2d8, 0xe6e4d9, 0x100f0f, 0x100f0f, 0xd14d41, 0xd0a215, 0x879a39),
+    theme!("gruvbox", "Gruvbox", dark, 0x7daea3, 0x504945, 0x282828, 0x1e1e1e, 0x161616, 0x3c3836, 0xd4be98, 0xd4be98, 0xea6962, 0xd8a657, 0xa9b665),
+    theme!("hackerman", "Hackerman", dark, 0x82fb9c, 0x1f253a, 0x0b0c16, 0x080910, 0x06060c, 0x151828, 0xddf7ff, 0xddf7ff, 0x50f872, 0x50f7d4, 0x4fe88f),
+    theme!("kanagawa", "Kanagawa", dark, 0xdcd7ba, 0x363646, 0x1f1f28, 0x17171e, 0x111116, 0x223249, 0xdcd7ba, 0xdcd7ba, 0xc34043, 0xc0a36e, 0x76946a),
+    theme!("lumon", "Lumon", dark, 0x8bc9eb, 0x243d56, 0x16242d, 0x101b21, 0x0b1216, 0x1b2d40, 0xd6e2ee, 0xf2fcff, 0x4d86b0, 0x6fa4c9, 0x5e95bc),
+    theme!("matte-black", "Matte Black", dark, 0xe68e0d, 0x2a2a2a, 0x121212, 0x0d0d0d, 0x090909, 0x1e1e1e, 0xbebebe, 0xbebebe, 0xd35f5f, 0xb91c1c, 0xffc107),
+    theme!("nord", "Nord", dark, 0x81a1c1, 0x434c5e, 0x2e3440, 0x222730, 0x191c23, 0x3b4252, 0xd8dee9, 0xd8dee9, 0xbf616a, 0xebcb8b, 0xa3be8c),
+    theme!("osaka-jade", "Osaka Jade", dark, 0x509475, 0x32473b, 0x111c18, 0x0c1512, 0x090f0d, 0x23372b, 0xc1c497, 0xf7e8b2, 0xff5345, 0x459451, 0x549e6a),
+    theme!("ristretto", "Ristretto", dark, 0xf38d70, 0x403e41, 0x2c2525, 0x211b1b, 0x181414, 0x3d2f2a, 0xe6d9db, 0xe6d9db, 0xfd6883, 0xf9cc6c, 0xadda78),
+    theme!("rose-pine", "Rosé Pine", light, 0x56949f, 0xdfdad9, 0xfaf4ed, 0xede7e1, 0xe1dbd5, 0xf2e9e1, 0x575279, 0x575279, 0xb4637a, 0xea9d34, 0x286983),
+    theme!("white", "White", light, 0x6e6e6e, 0xc0c0c0, 0xffffff, 0xf5f5f5, 0xe8e8e8, 0xc0c0c0, 0x000000, 0x000000, 0x2a2a2a, 0x4a4a4a, 0x3a3a3a),
+];
 
 #[cfg(test)]
 mod tests {
@@ -527,27 +648,56 @@ red = "#d20f39"
         assert!(read_theme(&root.path().join("missing")).is_none());
     }
 
+    fn hex(h: Hsla) -> u32 {
+        let r = gpui_kit::Rgba::from(h);
+        let b = |v: f32| (v * 255.0).round() as u32;
+        b(r.r) << 16 | b(r.g) << 8 | b(r.b)
+    }
+
     #[test]
     fn palettes_stay_readable() {
-        for c in [
+        let parsed = [
             from_colors_toml(COLORS_TOML),
             from_colors_toml(COLORS_TOML_V4),
             from_alacritty(ALACRITTY).map(|c| OmarchyColors { light: true, ..c }),
-        ] {
-            let c = c.expect("parsed");
+        ]
+        .map(|c| c.expect("parsed"));
+        for c in parsed
+            .into_iter()
+            .chain(BUNDLED.iter().map(Bundled::colors))
+        {
             let p = build_palette(&c);
-            assert_eq!(p.dark, !c.light);
+            assert_eq!(p.dark, !c.light, "{}", c.name);
             let s = c.background;
-            let hex = |h: Hsla| {
-                let r = gpui_kit::Rgba::from(h);
-                let b = |v: f32| (v * 255.0).round() as u32;
-                b(r.r) << 16 | b(r.g) << 8 | b(r.b)
-            };
             assert_eq!(hex(p.bg), s);
-            assert!(ratio(hex(p.fg2), s) >= 4.5);
-            assert!(ratio(hex(p.fg3), s) >= 3.0);
-            assert!(ratio(hex(p.accent_fg), hex(p.accent)) >= 4.5);
+            assert!(ratio(hex(p.fg), s) >= 4.5, "{}", c.name);
+            assert!(ratio(hex(p.fg2), s) >= 4.5, "{}", c.name);
+            assert!(ratio(hex(p.fg3), s) >= 2.5, "{}", c.name);
         }
+    }
+
+    #[test]
+    fn bundled_themes_use_their_named_shades() {
+        let t = bundled("tokyo-night").expect("bundled");
+        let p = t.palette();
+        assert_eq!(hex(p.panel), 0x13141c);
+        assert_eq!(hex(p.canvas), 0x0e0e14);
+        assert_eq!(hex(p.fg), 0xc0caf5);
+        assert_eq!(hex(p.sel), 0x292e42);
+        assert_eq!(hex(p.thumb), 0x24283b);
+        assert_eq!(hex(p.accent), 0x7aa2f7);
+        assert_eq!(hex(p.accent_fg), 0xffffff);
+        // A light accent takes the darkest shade for its text.
+        let hackerman = bundled("hackerman").expect("bundled").palette();
+        assert_eq!(hex(hackerman.accent_fg), 0x06060c);
+        assert_eq!(
+            hex(bundled("nord").expect("bundled").palette().accent_fg),
+            0xffffff
+        );
+        let latte = bundled("catppuccin-latte").expect("bundled").palette();
+        assert!(!latte.dark);
+        assert_eq!(hex(latte.thumb), 0xe3e4e8);
+        assert_eq!(BUNDLED.len(), 16);
     }
 
     #[test]

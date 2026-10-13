@@ -178,10 +178,17 @@ pub enum Choice {
     Dark,
     /// The colors of the active Omarchy theme (Linux).
     Omarchy,
+    /// One of the Omarchy themes bundled with the app (`omarchy::BUNDLED`), by id.
+    Named(&'static str),
 }
 
 impl Choice {
-    pub const ALL: [Choice; 4] = [Choice::System, Choice::Light, Choice::Dark, Choice::Omarchy];
+    /// Every choice, in menu order.
+    pub fn all() -> impl Iterator<Item = Choice> {
+        [Choice::System, Choice::Light, Choice::Dark, Choice::Omarchy]
+            .into_iter()
+            .chain(omarchy::BUNDLED.iter().map(|t| Choice::Named(t.id)))
+    }
 
     /// The name saved in the settings file.
     pub fn key(self) -> &'static str {
@@ -190,11 +197,12 @@ impl Choice {
             Self::Light => "light",
             Self::Dark => "dark",
             Self::Omarchy => "omarchy",
+            Self::Named(id) => id,
         }
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|c| c.key() == key)
+        Self::all().find(|c| c.key() == key)
     }
 
     /// The tray menu item.
@@ -204,6 +212,7 @@ impl Choice {
             Self::Light => "Light",
             Self::Dark => "Dark",
             Self::Omarchy => "Follow Omarchy",
+            Self::Named(id) => omarchy::bundled(id).map_or(id, |t| t.name),
         }
     }
 }
@@ -264,6 +273,7 @@ pub fn refresh(cx: &mut App) {
         Choice::Omarchy => {
             omarchy::palette(cx).unwrap_or_else(|| Palette::for_appearance(cx.window_appearance()))
         }
+        Choice::Named(id) => omarchy::bundled(id).map_or_else(Palette::light, |t| t.palette()),
     };
     apply(p, cx);
 }
