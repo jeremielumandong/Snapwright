@@ -6515,7 +6515,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6540,7 +6540,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-capture"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "block2 0.6.2",
  "libc",
@@ -6561,7 +6561,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -6574,7 +6574,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-editor"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ab_glyph",
  "png 0.18.1",
@@ -6586,7 +6586,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-library"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "image",
@@ -6599,7 +6599,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-ocr"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "objc2 0.6.5",
@@ -6621,7 +6621,7 @@ dependencies = [
 
 [[package]]
 name = "snapwright-record"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "block2 0.6.2",
  "gif 0.14.2",
