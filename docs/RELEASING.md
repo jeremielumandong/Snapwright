@@ -70,6 +70,13 @@ Nothing to configure.
    the first one creates the draft and the others add to it.
 4. Check the draft on the Releases page and publish it.
 
+Publishing is what ships the update: installed copies (AppImage, Windows installer, macOS app)
+find the newest non-draft, non-prerelease release within a day, download the stable-named
+asset (`Snapwright-linux-x86_64.AppImage`, `Snapwright-windows-x64-setup.exe`,
+`Snapwright-macos-universal.dmg`), check its SHA-256 and offer to restart. Keep those names
+and their `.sha256` files in `scripts/upload-release-assets.py`; renaming them strands every
+installed copy.
+
 ## Building locally
 
 ```bash

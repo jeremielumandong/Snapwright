@@ -24,6 +24,8 @@ mod settings;
 mod theme;
 mod toast;
 mod tray;
+mod update;
+mod updates;
 
 use std::time::Instant;
 
@@ -132,11 +134,14 @@ fn main() -> Result<()> {
                 }
                 Err(e) => tracing::warn!(error = %e, "tray icon unavailable"),
             }
+            updates::init(cx);
             let now = Instant::now();
             for request in &requests {
                 handle(*request, now, cx);
             }
         });
+    // "Restart to update" quit the app; start the new version or its installer now.
+    updates::run_after_exit();
     Ok(())
 }
 
@@ -277,6 +282,7 @@ fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
                 tray.set_theme(choice);
             }
         }
+        tray::Action::Update => updates::on_tray(cx),
         tray::Action::Quit => cx.quit(),
     }
 }
