@@ -1,0 +1,43 @@
+[package]
+name = "snapwright-ocr"
+description = "On-device text recognition for Snapwright: Apple Vision, Windows.Media.Ocr, ocrs on Linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ocrs.workspace = true
+rten.workspace = true
+rten-imageproc.workspace = true
+blake3.workspace = true
+ureq.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Security_Cryptography",
+    "Storage_Streams",
+] }
+windows-future.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSDictionary"] }
+objc2-core-foundation.workspace = true
+objc2-core-graphics = { workspace = true, features = ["CGColorSpace"] }
+objc2-vision.workspace = true
+
+[dev-dependencies]
+snapwright-editor.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

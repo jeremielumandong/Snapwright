@@ -12,6 +12,10 @@
 //!   and the grid treat it like any other) and the video file sits beside it in the store,
 //!   named by its own hash.
 //!
+//! * Text recognised in a capture (OCR, run by the app off the UI thread) is indexed with the
+//!   rest. It is read from the image shown, so an edit that blurs a password also takes the
+//!   password out of search; [`Library::pending_text`] lists what still needs reading.
+//!
 //! Deleting moves a capture to the trash; [`Library::purge_trash`] removes it for good, along
 //! with its files once no other capture shares them.
 
@@ -155,7 +159,7 @@ pub struct Capture {
     pub meta: Metadata,
     pub note: String,
     pub tags: Vec<String>,
-    /// Text recognised in the image (filled by OCR later).
+    /// Text recognised in the image shown (empty until OCR has read it, or if it has none).
     pub text: String,
     pub trashed: bool,
     /// The annotated version, if the capture was edited.
@@ -177,6 +181,16 @@ impl Capture {
     pub fn shown_bytes(&self) -> u64 {
         self.edit.as_ref().map_or(self.bytes, |e| e.bytes)
     }
+}
+
+/// A capture whose text has not been read from the image it shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextJob {
+    pub id: i64,
+    /// Hash of the image to read; hand it back to [`Library::set_recognized_text`].
+    pub hash: String,
+    /// The PNG to read.
+    pub image: PathBuf,
 }
 
 /// Which captures to list.
@@ -204,7 +218,7 @@ pub struct Library {
     db: Connection,
 }
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 impl Library {
     /// Opens (creating if needed) the library in `root`.
@@ -431,6 +445,46 @@ impl Library {
     /// Sets the recognised text (from OCR).
     pub fn set_text(&mut self, id: i64, text: &str) -> Result<()> {
         self.update(id, "UPDATE captures SET text = ?2 WHERE id = ?1", text)
+    }
+
+    /// Up to `limit` captures, newest first and trash left out, whose text has not been read
+    /// from the image they show: new captures, and edited ones since the edit.
+    pub fn pending_text(&self, limit: usize) -> Result<Vec<TextJob>> {
+        let mut stmt = self.db.prepare_cached(
+            "SELECT id, COALESCE(edit_hash, hash) FROM captures
+             WHERE deleted_ms IS NULL AND ocr_hash IS NOT COALESCE(edit_hash, hash)
+             ORDER BY created_ms DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, hash) = row?;
+            out.push(TextJob {
+                id,
+                image: self.image_path(&hash),
+                hash,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Stores the text read from image `hash` of capture `id` and indexes it. If the capture
+    /// was edited meanwhile, the text is still kept, and the capture stays pending until the
+    /// new image is read.
+    pub fn set_recognized_text(&mut self, id: i64, hash: &str, text: &str) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute(
+            "UPDATE captures SET text = ?2, ocr_hash = ?3 WHERE id = ?1",
+            params![id, text, hash],
+        )? == 0
+        {
+            return Err(Error::NotFound(id));
+        }
+        reindex(&tx, id)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn update(&mut self, id: i64, sql: &str, value: &str) -> Result<()> {
@@ -749,6 +803,15 @@ fn migrate(db: &Connection) -> Result<()> {
              ALTER TABLE captures ADD COLUMN duration_ms INTEGER;
              CREATE INDEX captures_video_hash ON captures (video_hash);
              PRAGMA user_version = 3;
+             COMMIT;",
+        )?;
+    }
+    if version < 4 {
+        // Which image the stored text was read from (NULL: not read yet).
+        db.execute_batch(
+            "BEGIN;
+             ALTER TABLE captures ADD COLUMN ocr_hash TEXT;
+             PRAGMA user_version = 4;
              COMMIT;",
         )?;
     }

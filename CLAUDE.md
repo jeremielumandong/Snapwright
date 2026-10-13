@@ -53,6 +53,7 @@ crates/
   cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
   editor/   snapwright-editor   annotation scene (shapes, crop), tiny-skia renderer, undo history
   library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
+  ocr/      snapwright-ocr      on-device text recognition: Vision, Windows.Media.Ocr, ocrs (Linux)
   record/   snapwright-record   screen recording: paced capture, MP4 (OS encoders / ffmpeg) and GIF
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
@@ -110,6 +111,9 @@ site/                           marketing site (static HTML, deployed by .github
 - Anything shown on screen right after a capture (the quick-access preview) must close
   before the next grab: `session::start` and `repeat_last` dismiss it and wait
   `toast::SETTLE`.
+- OCR on Linux fetches two ocrs models (~12 MB) on first use; set `SNAPWRIGHT_OCR_MODELS` to
+  a folder that has them to skip the download (the ocr tests cache them in `target/tmp`).
+  `cargo run --release -p snapwright-ocr --example recognize -- shot.png` prints a PNG's text.
 - `RenderImage` takes BGRA pixels in an `image::RgbaImage` buffer; the channel order is not
   converted, so capture frames go in as they are. `image` must be the version GPUI links.
 - Colours come from `theme::palette(cx)` (windows) or `theme::hud` (overlay, loupe, preview,

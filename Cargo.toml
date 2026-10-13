@@ -6,6 +6,7 @@ members = [
     "crates/cli",
     "crates/editor",
     "crates/library",
+    "crates/ocr",
     "crates/record",
 ]
 
@@ -20,6 +21,7 @@ repository = "https://github.com/jeremielumandong/snapwright"
 snapwright-capture = { path = "crates/capture" }
 snapwright-library = { path = "crates/library" }
 snapwright-editor = { path = "crates/editor" }
+snapwright-ocr = { path = "crates/ocr" }
 snapwright-record = { path = "crates/record" }
 
 # common
@@ -37,6 +39,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # library
 rusqlite = { version = "0.40", features = ["bundled"] }
 blake3 = "1.8"
+
+# OCR on Linux: ocrs (pure Rust, MIT/Apache) with its models fetched once into the data folder
+ocrs = { version = "0.13", default-features = false, features = ["rten"] }
+rten = { version = "0.26", default-features = false, features = ["rten_format"] }
+rten-imageproc = "0.26"
+ureq = "3"
 
 # editor: the same rasteriser as Emulsion, and a small font loader for annotation text
 serde = { version = "1", features = ["derive"] }
@@ -66,6 +74,7 @@ libc = "0.2"
 
 # Windows
 windows = "0.62"
+windows-future = "0.3"
 raw-window-handle = "0.6"
 
 # macOS
@@ -75,6 +84,7 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGDataProvider", "CGDirectDisplay", "objc2"] }
 objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "libc", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
 block2 = "0.6"
+objc2-vision = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "VNTypes"] }
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-media", "objc2-core-video", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings", "AVAnimation"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferPool", "CVReturn"] }
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
