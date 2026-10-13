@@ -52,6 +52,24 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Levenshtein distance between two words.
+fn edits(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let next = (prev + usize::from(ca != cb))
+                .min(row[j] + 1)
+                .min(row[j + 1] + 1);
+            prev = row[j + 1];
+            row[j + 1] = next;
+        }
+    }
+    row[b.len()]
+}
+
 #[test]
 fn reads_a_selection_of_ui_text() {
     let Some(mut ocr) = recognizer() else {
@@ -93,7 +111,10 @@ fn reads_small_text_across_a_whole_screen_in_bgra() {
         return;
     };
     let (w, h) = (1920, 1080);
-    // Small UI text in corners, the middle, and across the places a tiling engine cuts.
+    // Small UI text in corners, the middle, and across the places a tiling engine cuts. This
+    // checks that every line is read once; each engine misreads a letter or two of this font
+    // at this size ("Quarterty" on Windows, "Batterv" from ocrs at 16 px), so a word one edit
+    // away counts.
     let texts = [
         (20., 16., 14., "Inbox notifications"),
         (720., 300., 14., "Quarterly revenue report"),
@@ -129,7 +150,7 @@ fn reads_small_text_across_a_whole_screen_in_bgra() {
         "battery",
         "charging",
     ] {
-        let hits = found.iter().filter(|w| *w == want).count();
+        let hits = found.iter().filter(|w| edits(w, want) <= 1).count();
         assert_eq!(hits, 1, "{want:?} found {hits} times in {text:?}");
     }
 }

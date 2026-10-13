@@ -238,9 +238,11 @@ MIT/Apache). Nothing is sent anywhere.
   download for a feature that works a minute later anyway.
 - ocrs squeezes any image into its 800x600 detection input, which loses screenshot-sized text,
   so Linux detects words per overlapping 800x600 tile and reads lines on the whole image.
-  Windows tiles the same way past `OcrEngine::MaxImageDimension` (and reads screens at 2x,
-  since it misreads 1x UI text), and macOS at 2x in 1024 px tiles, since Vision garbles small text
-  on a whole 1080p frame. On Linux, images under 0.24 MP (a
+  Windows tiles the same way past `OcrEngine::MaxImageDimension`, and macOS reads at 2x in
+  1024 px tiles, since Vision garbles small text on a whole 1080p frame. Each engine still
+  misreads a letter of 14 to 16 px Geist now and then (Windows reads "l" as "t" at any scale,
+  ocrs 16 px "y" as "v"), so the whole-screen test checks that every line is read once and
+  accepts a word one edit off. On Linux, images under 0.24 MP (a
   selection) are read at 2x; full screens at 1x, which reads about the same text in a third
   of the time (1 to 1.5 s for 1600x1000 on four cores).
 - The library stores the text of the image it shows (the edit when there is one) and which
