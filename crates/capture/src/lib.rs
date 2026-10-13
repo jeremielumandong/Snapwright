@@ -11,6 +11,7 @@
 //! Every backend returns [`Frame`]s in BGRA, the layout macOS and Windows capture in and the
 //! one GPUI's `RenderImage` takes, so a frame reaches the overlay without a conversion.
 
+mod cursor;
 mod frame;
 
 #[cfg(target_os = "linux")]
@@ -125,6 +126,7 @@ pub struct WindowInfo {
 /// expensive to set up, so repeat captures are much faster than the first.
 pub struct Capturer {
     backend: Backend,
+    cursor: bool,
 }
 
 // Captures run off the UI thread, so the capturer must move between threads.
@@ -138,7 +140,19 @@ impl Capturer {
     pub fn new() -> Result<Self> {
         Ok(Self {
             backend: Backend::new()?,
+            cursor: false,
         })
+    }
+
+    /// Whether captures include the mouse pointer. Off by default (screenshots); recordings
+    /// turn it on.
+    pub fn set_cursor(&mut self, cursor: bool) {
+        self.cursor = cursor;
+    }
+
+    /// Whether captures include the mouse pointer.
+    pub fn cursor(&self) -> bool {
+        self.cursor
     }
 
     /// Lists the connected displays.
@@ -148,7 +162,7 @@ impl Capturer {
 
     /// Captures one display at full resolution.
     pub fn capture_display(&mut self, display: &Display) -> Result<Frame> {
-        self.backend.capture(display)
+        self.backend.capture(display, self.cursor)
     }
 
     /// Lists visible top-level windows, front to back. Call it before showing any window of

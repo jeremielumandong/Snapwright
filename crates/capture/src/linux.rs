@@ -24,10 +24,10 @@ impl Backend {
         }
     }
 
-    pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
+    pub(crate) fn capture(&mut self, display: &Display, cursor: bool) -> Result<Frame> {
         match self {
-            Self::X11(b) => b.capture(display),
-            Self::Wayland(b) => b.capture(display),
+            Self::X11(b) => b.capture(display, cursor),
+            Self::Wayland(b) => b.capture(display, cursor),
         }
     }
 

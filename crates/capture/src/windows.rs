@@ -13,8 +13,10 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
-    DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTPUT_DESC, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput1,
-    IDXGIOutputDuplication, IDXGIResource,
+    DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTDUPL_POINTER_SHAPE_INFO,
+    DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR, DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR,
+    DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME, DXGI_OUTPUT_DESC, IDXGIAdapter1, IDXGIFactory1,
+    IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI,
@@ -22,6 +24,7 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::core::Interface;
 
+use crate::cursor::{Cursor, CursorKind};
 use crate::{CaptureError, Display, Frame, Rect, Result, WindowInfo};
 
 fn err(api: &'static str, e: windows::core::Error) -> CaptureError {
@@ -51,6 +54,11 @@ struct Output {
     context: ID3D11DeviceContext,
     duplication: Option<IDXGIOutputDuplication>,
     staging: Option<(ID3D11Texture2D, u32, u32)>,
+    /// The pointer as the duplication last reported it: shown, and where. Desktop
+    /// Duplication leaves the pointer out of the desktop image.
+    pointer: Option<(i32, i32)>,
+    /// The last pointer shape; the duplication sends one only when it changes.
+    shape: Option<Cursor>,
 }
 
 impl Backend {
@@ -73,11 +81,11 @@ impl Backend {
         list_windows()
     }
 
-    pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
+    pub(crate) fn capture(&mut self, display: &Display, cursor: bool) -> Result<Frame> {
         let Some(output) = self.outputs.iter_mut().find(|o| o.id == display.id) else {
             return Err(CaptureError::NoSuchDisplay(display.id));
         };
-        match output.capture() {
+        let mut frame = match output.capture() {
             // The duplication was lost (mode change, secure desktop) and dropped: retry once
             // with a new one.
             Err(e) if output.duplication.is_none() => {
@@ -85,7 +93,15 @@ impl Backend {
                 output.capture()
             }
             other => other,
+        }?;
+        if cursor && let (Some((x, y)), Some(shape)) = (output.pointer, &output.shape) {
+            frame.draw_cursor(&Cursor {
+                x,
+                y,
+                ..shape.clone()
+            });
         }
+        Ok(frame)
     }
 }
 
@@ -131,6 +147,8 @@ fn enumerate() -> Result<Vec<Output>> {
                 context,
                 duplication: None,
                 staging: None,
+                pointer: None,
+                shape: None,
             });
         }
     }
@@ -234,6 +252,7 @@ impl Output {
             }
             Err(e) => return Err(err("AcquireNextFrame", e)),
         }
+        self.update_pointer(&dup, &info);
         let copied = resource
             .ok_or_else(|| CaptureError::Platform {
                 api: "AcquireNextFrame",
@@ -249,6 +268,50 @@ impl Output {
         copied?;
         released?;
         self.read_staging()
+    }
+
+    /// Tracks the pointer from a frame's info: its position when the mouse moved, its shape
+    /// when that changed. Failures only cost the pointer in recordings.
+    fn update_pointer(&mut self, dup: &IDXGIOutputDuplication, info: &DXGI_OUTDUPL_FRAME_INFO) {
+        if info.LastMouseUpdateTime != 0 {
+            let p = info.PointerPosition;
+            self.pointer = p.Visible.as_bool().then_some((p.Position.x, p.Position.y));
+        }
+        if info.PointerShapeBufferSize == 0 {
+            return;
+        }
+        let mut data = vec![0u8; info.PointerShapeBufferSize as usize];
+        let mut used = 0u32;
+        let mut shape = DXGI_OUTDUPL_POINTER_SHAPE_INFO::default();
+        // SAFETY: the buffer is a local of the size passed; the frame is still acquired.
+        let got = unsafe {
+            dup.GetFramePointerShape(
+                data.len() as u32,
+                data.as_mut_ptr().cast(),
+                &mut used,
+                &mut shape,
+            )
+        };
+        if let Err(e) = got {
+            tracing::debug!(error = %e, "no pointer shape");
+            return;
+        }
+        let kind = match shape.Type as i32 {
+            t if t == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR.0 => CursorKind::Straight,
+            t if t == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR.0 => CursorKind::MaskedColor,
+            t if t == DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME.0 => CursorKind::Monochrome,
+            _ => return,
+        };
+        data.truncate(used as usize);
+        self.shape = Some(Cursor {
+            kind,
+            x: 0,
+            y: 0,
+            width: shape.Width,
+            height: shape.Height,
+            pitch: shape.Pitch as usize,
+            data,
+        });
     }
 
     fn copy_to_staging(&mut self, texture: &ID3D11Texture2D) -> Result<()> {
