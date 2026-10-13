@@ -107,6 +107,8 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 
 ## Follow-ups
 
+- Updates: a Settings switch for the automatic checks and downloads (Switchyard's
+  `updates.check` / `updates.auto_download`) once there is a settings window.
 - Recording: system audio and microphone (ScreenCaptureKit audio, WASAPI loopback), mixed
   into the MP4. The biggest gap against Snagit, CleanShot X and Loom.
 - Recording: macOS through a running `SCStream` (IOSurfaces straight into the writer, 60 fps)
