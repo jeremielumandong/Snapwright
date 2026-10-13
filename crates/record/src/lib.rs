@@ -329,7 +329,6 @@ fn record(
         let _ = ready.send(Err(RecordError::EmptyRegion(r)));
         return Err(RecordError::Panicked);
     }
-    let start = Instant::now();
     let (frames_tx, frames_rx) = mpsc::sync_channel::<(Frame, Duration)>(3);
     let (open_tx, open_rx) = mpsc::sync_channel(1);
     let encoder = {
@@ -371,9 +370,13 @@ fn record(
                 source,
             })?
     };
-    match open_rx.recv() {
+    // The clock starts once the encoder is open, just before `start` returns: setup
+    // time (spawning ffmpeg, creating the file) is not part of the recording.
+    let start = match open_rx.recv() {
         Ok(Ok(())) => {
+            let start = Instant::now();
             let _ = ready.send(Ok(()));
+            start
         }
         Ok(Err(e)) => {
             drop(frames_tx);
@@ -385,7 +388,7 @@ fn record(
             let _ = ready.send(Err(RecordError::Panicked));
             return Err(RecordError::Panicked);
         }
-    }
+    };
 
     let fit = |frame: Frame| -> Option<Frame> {
         if frame.width == width && frame.height == height {
