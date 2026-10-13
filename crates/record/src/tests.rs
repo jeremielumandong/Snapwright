@@ -183,24 +183,43 @@ fn pause_leaves_time_out() {
         height: 64,
         n: 0,
     };
+    // Sleeps overshoot on busy CI runners (macOS by hundreds of ms), so the expected
+    // length comes from the measured windows, not the requested sleeps.
+    let before_start = Instant::now();
     let recorder = Recorder::start(source, Options::new(Format::Gif), &path).expect("start");
+    let after_start = Instant::now();
     std::thread::sleep(Duration::from_millis(300));
+    let before_pause = Instant::now();
     recorder.pause();
+    let after_pause = Instant::now();
     assert!(recorder.is_paused());
     std::thread::sleep(Duration::from_millis(200));
     let during = recorder.elapsed();
     std::thread::sleep(Duration::from_millis(400));
     assert!(recorder.elapsed() - during < Duration::from_millis(100));
+    let before_resume = Instant::now();
     recorder.resume();
+    let after_resume = Instant::now();
     std::thread::sleep(Duration::from_millis(300));
-    let started = Instant::now();
+    let before_stop = Instant::now();
     let summary = recorder.stop().expect("stop");
-    assert!(started.elapsed() < Duration::from_secs(5));
-    let d = summary.duration.as_secs_f32();
+    let after_stop = Instant::now();
+    assert!(after_stop - before_stop < Duration::from_secs(5));
+
+    // Pause and resume take effect on the next tick, and the length ends one frame
+    // after the last tick, so allow a few frame intervals (15 fps GIF) either way.
+    let slack = Duration::from_millis(250);
+    let shortest = (before_pause - after_start) + (before_stop - after_resume);
+    let longest = (after_pause - before_start) + (after_stop - before_resume);
+    let paused = before_resume - after_pause;
+    let d = summary.duration;
     assert!(
-        (0.5..0.95).contains(&d),
-        "recorded {d} s of 1.2 s with 0.6 s paused"
+        d + slack >= shortest && d <= longest + slack,
+        "recorded {d:?}, expected {shortest:?}..{longest:?} with {paused:?} paused"
     );
+    // The pause window is far wider than the slack, so a recorder that kept counting
+    // through it would fail the upper bound.
+    assert!(paused >= Duration::from_millis(600) && paused > slack * 2);
 }
 
 #[test]
