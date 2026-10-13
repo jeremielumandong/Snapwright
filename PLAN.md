@@ -114,6 +114,12 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 - Recording: auto-zoom on clicks (Screen Studio style) as an export step, from the pointer
   path recorded alongside the video.
 - Recording: the bar on Wayland (a layer-shell anchor beside the area) and a portal backend.
+- Recording: write pointer positions, clicks and keystrokes to a sidecar event track next to
+  the video from day one, so click highlights, keystroke badges and auto-zoom stay
+  non-destructive edits (CleanShot bakes them in).
+- Recording: warm the encoder before the first frame and add hotkey-to-first-frame to
+  `latency-bench.sh`. CI's macOS VMs (software VideoToolbox) shed about half the frames of
+  the first second.
 
 - macOS: `SCScreenshotManager` costs ~15 ms a shot and ~270 ms cold. Try keeping an
   `SCStream` paused between captures, or starting one when the hotkey's modifiers go down.
