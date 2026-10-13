@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 snapwright-capture.workspace = true
+snapwright-record.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 png.workspace = true

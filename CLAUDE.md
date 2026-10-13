@@ -1,7 +1,7 @@
 # CLAUDE.md — Snapwright
 
-Snapwright is a fast, cross-platform screenshot tool with a searchable capture library,
-written in Rust with GPUI (through gpui-kit).
+Snapwright is a fast, cross-platform screenshot and screen recording tool with a searchable
+capture library, written in Rust with GPUI (through gpui-kit).
 
 - Product plan: [Snapwright: Product & Technical Plan](https://claude.ai/code/artifact/4bcb7cd7-57cc-4ff4-87cc-561af7643f9c)
 - Task plan: `PLAN.md` (work through the current phase in order)
@@ -27,6 +27,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 xvfb-run -a -s "-screen 0 1920x1080x24" cargo test -p snapwright-capture --test x11 -- --ignored
 cargo run --release -p snapwright-cli -- bench --runs 100
+cargo run --release -p snapwright-cli -- record --seconds 3 -o clip.mp4   # or clip.gif
 cargo run --release -p snapwright-app -- --capture-now   # SNAPWRIGHT_LOG=debug for timings
 xvfb-run -a -s "-screen 0 1600x1000x24" scripts/overlay-e2e.sh target/release
 xvfb-run -a -s "-screen 0 1920x1080x24" scripts/latency-bench.sh target/release   # p50/p95
@@ -39,8 +40,8 @@ under Xvfb.
 Type-check other platforms from Linux (no linking):
 
 ```bash
-cargo clippy -p snapwright-capture --target aarch64-apple-darwin -- -D warnings
-CC_x86_64_pc_windows_msvc=clang cargo clippy -p snapwright-capture --target x86_64-pc-windows-msvc -- -D warnings
+cargo clippy -p snapwright-capture -p snapwright-record --target aarch64-apple-darwin -- -D warnings
+CC_x86_64_pc_windows_msvc=clang cargo clippy -p snapwright-capture -p snapwright-record --target x86_64-pc-windows-msvc -- -D warnings
 ```
 
 ## Workspace layout
@@ -52,6 +53,7 @@ crates/
   cli/      snapwright-cli      `snapwright` binary: displays, windows, capture, bench
   editor/   snapwright-editor   annotation scene (shapes, crop), tiny-skia renderer, undo history
   library/  snapwright-library  capture library: content-addressed store, SQLite + FTS5, tags, trash
+  record/   snapwright-record   screen recording: paced capture, MP4 (OS encoders / ffmpeg) and GIF
 scripts/overlay-e2e.sh          hotkey to clipboard under Xvfb (needs xdotool, xclip, ImageMagick)
 packaging/                      AppImage, DMG/PKG and NSIS builds (from Switchyard); see docs/RELEASING.md
 site/                           marketing site (static HTML, deployed by .github/workflows/pages.yml)
@@ -117,5 +119,10 @@ site/                           marketing site (static HTML, deployed by .github
   `theme::key_label`.
 - After a rebuild, a running dev app's `/proc/<pid>/exe` ends in ` (deleted)`; match by prefix
   when stopping it, or `--library` and friends get forwarded to the stale instance.
+- Recording: MP4 on Linux needs `ffmpeg` on PATH (`SNAPWRIGHT_FFMPEG` overrides); its tests
+  skip without it. Encoders live on their own thread for their whole life (COM and
+  AVFoundation objects never cross threads). H.264 wants even sizes; the recorder rounds down.
+- Recording: the record overlay is the screenshot overlay in `Mode::Record`; the recorder
+  starts `toast::SETTLE` after the overlays close so they are not in the first frame.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
   full-screen overlay. `tracing` macros shadow a local named `display`.

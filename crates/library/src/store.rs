@@ -34,6 +34,33 @@ pub fn write_once(path: &Path, bytes: &[u8]) -> Result<()> {
     result.map_err(io)
 }
 
+/// Puts the file at `from` into the store at `path`, unless `path` already exists: a hard
+/// link when both are on one file system (no second copy on disk), else a copy.
+pub fn link_once(from: &Path, path: &Path) -> Result<()> {
+    let io = |source| Error::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+    if path.exists() {
+        return Ok(());
+    }
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir).map_err(io)?;
+    if std::fs::hard_link(from, path).is_ok() {
+        return Ok(());
+    }
+    let tmp = dir.join(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("video"),
+        std::process::id()
+    ));
+    let result = std::fs::copy(from, &tmp).and_then(|_| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map_err(io)
+}
+
 /// Removes a file, logging rather than failing: a stray file costs disk, not correctness.
 pub fn remove(path: &Path) {
     if let Err(e) = std::fs::remove_file(path)

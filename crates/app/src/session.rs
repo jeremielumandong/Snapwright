@@ -1,5 +1,6 @@
 //! One capture session: grab every display, show an overlay per display, deliver the
-//! selection, close the overlays.
+//! selection, close the overlays. A recording starts the same way: the selection is the area
+//! to record instead of the pixels to keep.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -48,11 +49,24 @@ struct LastRegion {
 }
 impl Global for LastRegion {}
 
+/// What the overlay's selection is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mode {
+    /// A screenshot: copy and keep the selected pixels.
+    #[default]
+    Capture,
+    /// A recording of the selected area.
+    Record(snapwright_record::Format),
+}
+
 /// Overlay windows of the session in progress, if any.
 #[derive(Default)]
 struct Active {
     capturing: bool,
     windows: Vec<AnyWindowHandle>,
+    mode: Mode,
+    /// The displays the overlays show, for starting a recording on one.
+    displays: Vec<Display>,
 }
 impl Global for Active {}
 
@@ -76,6 +90,8 @@ pub fn popup_bounds(bounds: Bounds<gpui_kit::Pixels>) -> Bounds<gpui_kit::Pixels
 
 /// Where a pop-up goes on Wayland, which places surfaces itself.
 #[derive(Debug, Clone, Copy)]
+// Only Wayland reads the margin.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum Placement {
     /// The whole display (the overlay).
     Fill,
@@ -146,6 +162,11 @@ fn gpui_display(
         .cloned()
 }
 
+/// The app's warm capturer, shared with recordings.
+pub fn capturer(cx: &App) -> Arc<Mutex<Capturer>> {
+    cx.global::<CaptureService>().0.clone()
+}
+
 /// Connects to the platform capture API once, at startup.
 pub fn init(cx: &mut App) -> snapwright_capture::Result<()> {
     let capturer = Capturer::new()?;
@@ -192,11 +213,17 @@ fn warm_up(cx: &mut App) {
 /// Starts a session: captures every display off the UI thread, then shows the overlays.
 /// Ignored while a session is already open.
 pub fn start(pressed_at: Instant, cx: &mut App) {
+    start_mode(Mode::Capture, pressed_at, cx);
+}
+
+/// Starts a session whose selection is used as `mode` says.
+pub fn start_mode(mode: Mode, pressed_at: Instant, cx: &mut App) {
     let active = cx.global_mut::<Active>();
     if active.capturing || !active.windows.is_empty() {
         return;
     }
     active.capturing = true;
+    active.mode = mode;
     // A quick-access preview still on screen would end up in the capture.
     let settle = crate::toast::dismiss(cx).then_some(crate::toast::SETTLE);
     let capturer = cx.global::<CaptureService>().0.clone();
@@ -233,7 +260,7 @@ pub fn start(pressed_at: Instant, cx: &mut App) {
                         windows = windows.len(),
                         "captured"
                     );
-                    open_overlays(shots, &windows, pressed_at, cx);
+                    open_overlays(shots, &windows, mode, pressed_at, cx);
                 }
                 Err(e) => tracing::error!(error = %e, "capture failed"),
             }
@@ -299,11 +326,13 @@ pub fn describe(
 fn open_overlays(
     shots: Vec<(Display, Frame)>,
     on_screen: &[WindowInfo],
+    mode: Mode,
     pressed_at: Instant,
     cx: &mut App,
 ) {
     let screens = cx.displays();
     let mut windows = Vec::with_capacity(shots.len());
+    cx.global_mut::<Active>().displays = shots.iter().map(|(d, _)| d.clone()).collect();
     for (display, frame) in shots {
         let b = display.bounds;
         let s = display.scale;
@@ -335,7 +364,7 @@ fn open_overlays(
         };
         let targets = snap_targets(&display, &frame, on_screen);
         match cx.open_window(options, |window, cx| {
-            cx.new(|cx| Overlay::new(frame, targets, pressed_at, window, cx))
+            cx.new(|cx| Overlay::new(frame, targets, mode, pressed_at, window, cx))
         }) {
             Ok(handle) => windows.push(handle.into()),
             Err(e) => {
@@ -462,6 +491,27 @@ pub fn finish(current: &mut Window, cx: &mut App) {
     }
 }
 
+/// Ends a recording session with a selection: closes the overlays and starts recording
+/// `region` (frame pixels) of display `display_id`.
+pub fn deliver_recording(
+    display_id: u64,
+    region: Rect,
+    meta: Metadata,
+    current: &mut Window,
+    cx: &mut App,
+) {
+    let active = cx.global::<Active>();
+    let mode = active.mode;
+    let display = active.displays.iter().find(|d| d.id == display_id).cloned();
+    finish(current, cx);
+    match (mode, display) {
+        (Mode::Record(format), Some(display)) => {
+            crate::recording::begin(display, region, format, meta, cx);
+        }
+        _ => tracing::error!(display_id, "no display to record"),
+    }
+}
+
 /// Ends the session with a selection: closes the overlays at once, remembers the region for
 /// "repeat last region", then hands the pixels to [`keep`].
 pub fn deliver(
@@ -548,7 +598,7 @@ fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
         cx.update(|cx| {
             crate::library_view::notify_changed(cx);
             if let Some((id, thumb)) = stored {
-                crate::toast::show(id, thumb, (width, height), cx);
+                crate::toast::show(id, thumb, (width, height), None, cx);
             }
         });
     })

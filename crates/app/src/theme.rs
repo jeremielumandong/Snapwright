@@ -156,6 +156,10 @@ pub mod hud {
     pub fn success_soft() -> Hsla {
         ca(0x30a46c33)
     }
+    /// The recording dot.
+    pub fn record() -> Hsla {
+        c(0xf0524b)
+    }
 }
 
 /// The active palette.

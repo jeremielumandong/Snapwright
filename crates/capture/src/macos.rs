@@ -154,14 +154,14 @@ impl Backend {
         Ok(self.targets.iter().map(|t| t.display.clone()).collect())
     }
 
-    pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
+    pub(crate) fn capture(&mut self, display: &Display, cursor: bool) -> Result<Frame> {
         if !self.targets.iter().any(|t| t.display.id == display.id) {
             self.refresh()?;
         }
         let Some(target) = self.targets.iter().find(|t| t.display.id == display.id) else {
             return Err(CaptureError::NoSuchDisplay(display.id));
         };
-        let image = screenshot(target)?;
+        let image = screenshot(target, cursor)?;
         let image = Some(&*image);
         let width = CGImage::width(image) as u32;
         let height = CGImage::height(image) as u32;
@@ -268,14 +268,14 @@ fn target(display: &SCDisplay, exclude: &NSArray<SCRunningApplication>, main: u3
     }
 }
 
-fn screenshot(target: &Target) -> Result<CFRetained<CGImage>> {
+fn screenshot(target: &Target, cursor: bool) -> Result<CFRetained<CGImage>> {
     // SAFETY: a fresh configuration object, set before use.
     let config = unsafe {
         let config = SCStreamConfiguration::new();
         config.setWidth(target.pixel_width);
         config.setHeight(target.pixel_height);
         config.setPixelFormat(PIXEL_FORMAT_BGRA);
-        config.setShowsCursor(false);
+        config.setShowsCursor(cursor);
         config
     };
     let (tx, rx) = mpsc::sync_channel(1);

@@ -38,7 +38,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libxcb1-dev libvulkan-dev libfontconfig-dev libfreetype-dev pkg-config \
-            xvfb mesa-vulkan-drivers xdotool xclip x11-xserver-utils imagemagick
+            xvfb mesa-vulkan-drivers xdotool xclip x11-xserver-utils imagemagick ffmpeg
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - name: X11 capture tests (Xvfb)
