@@ -3,133 +3,216 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Snapwright: the screenshot tool that keeps up with you</title>
-<meta name="description" content="Snapwright captures any part of your screen in milliseconds, annotates it, and files it in a searchable library. For macOS, Windows and Linux.">
-<meta property="og:title" content="Snapwright: the screenshot tool that keeps up with you">
-<meta property="og:description" content="Snapwright captures any part of your screen in milliseconds, annotates it, and files it in a searchable library. For macOS, Windows and Linux.">
+<title>Snapwright: screenshots at the speed of thought</title>
+<meta name="description" content="Snapwright captures any part of your screen in milliseconds, marks it up, records it, and files it in a library you can search, down to the text in every shot. For macOS, Windows and Linux.">
+<meta property="og:title" content="Snapwright: screenshots at the speed of thought">
+<meta property="og:description" content="Snapwright captures any part of your screen in milliseconds, marks it up, records it, and files it in a library you can search, down to the text in every shot. For macOS, Windows and Linux.">
 <meta property="og:image" content="img/overlay.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800;900&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="site"><div class="wrap">
-  <a class="brand" href="index.html"><img src="favicon.svg" alt="">Snapwright</a>
-  <nav><a href="index.html" aria-current="page">Home</a><a href="features.html">Features</a><a href="download.html">Download</a><a href="https://github.com/jeremielumandong/Snapwright" class="hide-sm">GitHub</a></nav>
+<header class="site-header"><div class="wrap">
+  <a class="brand" href="#top"><img src="favicon.svg" alt="">Snapwright</a>
+  <nav>
+    <a href="#capture">Capture</a>
+    <a href="#markup">Mark up</a>
+    <a href="#library">Library</a>
+    <a href="#download">Download</a>
+  </nav>
+  <div class="header-end">
+    <a class="gh" href="https://github.com/jeremielumandong/Snapwright">GitHub ↗</a>
+    <a class="pill" href="#download">Download<span data-os-short>macOS</span></a>
+  </div>
 </div></header>
-<main>
-<div class="hero"><div class="wrap">
-  <span class="eyebrow"><b>Early preview</b> · macOS, Windows and Linux</span>
-  <h1>Screenshots at the <em>speed of thought</em>.</h1>
-  <p class="lead">Press one key and the overlay is already there. Drag, release, and the shot is on your clipboard,
-  saved, and filed in a library you can actually search. No lag, no clutter, no lost captures.</p>
-  <div class="cta">
-    <a class="btn primary" href="download.html">Get Snapwright</a>
-    <a class="btn" href="features.html">See every feature</a>
+
+<main id="top">
+<section class="wrap">
+  <div class="strap">
+    <span class="dot">Early preview</span>
+    <span>A screenshot tool, written in Rust</span>
+    <span>macOS · Windows · Linux</span>
   </div>
-  <p class="fine">Press <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>2</kbd> (<kbd>⌘</kbd> <kbd>Shift</kbd> <kbd>2</kbd> on a Mac) and you're capturing.</p>
-  <div class="shot"><img src="img/overlay.png" alt="Snapwright's overlay selecting part of a dashboard, with the size label and colour loupe"></div>
+
+  <h1>Screenshots at the <span class="sel-word"><i></i><i></i><i></i><i></i><b>&lt; 50 ms</b>speed</span> of thought.</h1>
+
+  <div class="lede-row">
+    <p class="lede">Press one key and the overlay is already there. Drag, let go, and the shot is on your clipboard, saved to disk, and filed in a library you can actually search.</p>
+    <div class="cta">
+      <a class="big-btn" href="https://github.com/jeremielumandong/Snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
+      <span class="cta-sub"><span data-dl-sub>Universal DMG · Apple silicon &amp; Intel</span> · <a href="#download">other platforms</a></span>
+    </div>
+  </div>
+
+  <figure class="demo">
+    <div class="demo-head label">
+      <span>Fig. 1 — Try it here</span>
+      <span class="hint">Press <kbd data-mod>⌘</kbd><kbd>Shift</kbd><kbd>2</kbd> or just drag across the image</span>
+    </div>
+    <div class="stage" id="stage">
+      <img src="img/library.png" alt="The Snapwright library window, used here as a desktop to capture from" draggable="false" width="1200" height="760">
+      <div class="dim" hidden></div>
+      <div class="sel" hidden><span></span></div>
+      <div class="ch-h" hidden></div>
+      <div class="ch-v" hidden></div>
+      <span class="coord" hidden></span>
+      <div class="flash"></div>
+      <div class="preview" aria-hidden="true">
+        <div class="well"><div class="crop"></div></div>
+        <div class="foot"><span>Copied · saved</span><span>Edit</span></div>
+      </div>
+    </div>
+    <div class="demo-lib">
+      <div class="label">Library<br><span id="cap-count">0 captures</span></div>
+      <div class="shots" id="shots"><span class="empty">Nothing yet. Drag across the image above.</span></div>
+    </div>
+  </figure>
+
   <div class="stats">
-    <div><b>&lt; 50 ms</b><span>from hotkey to overlay, our budget on every platform</span></div>
-    <div><b>5 ms</b><span>to repeat your last region straight to the clipboard</span></div>
-    <div><b>0%</b><span>CPU while it waits in your tray</span></div>
-    <div><b>3</b><span>platforms, one native app: macOS, Windows, Linux</span></div>
+    <div><strong>&lt;50 ms</strong><span>from hotkey to overlay, on every platform</span></div>
+    <div><strong>5 ms</strong><span>to repeat your last region to the clipboard</span></div>
+    <div><strong>0%</strong><span>CPU while it waits in your tray</span></div>
+    <div><strong>0</strong><span>accounts, servers or web views. Local-first.</span></div>
   </div>
-</div></div>
+</section>
 
-<section class="alt"><div class="wrap">
-  <div class="section-head"><h2>Built for the <em>hundredth</em> screenshot of the day.</h2>
-  <p>Most capture tools are fine the first time. Snapwright is designed for people who capture all day:
-  engineers filing bugs, designers giving feedback, support teams writing guides.</p></div>
-  <div class="split">
-    <div>
-      <h3>Capture without breaking flow</h3>
-      <p>Snapwright stays warm in the background, so the overlay appears the instant you press the hotkey.
-      Your screen freezes, you pick a region, and you're done.</p>
-      <ul class="ticks">
-        <li>Hover to snap to any window, click to take it</li>
-        <li>Pixel-perfect nudging with the arrow keys</li>
-        <li>A colour loupe that copies any pixel as hex</li>
-        <li>Copied and saved the moment you let go</li>
-      </ul>
+<section class="wrap">
+  <div class="section-head">
+    <h2>The whole life of a screenshot.</h2>
+    <p>From the keypress to the moment you need it again three weeks later. Built for the hundredth capture of the day, not just the first.</p>
+  </div>
+
+  <article class="chapter" id="capture">
+    <div class="text">
+      <div class="num">01 / 03</div>
+      <h3>Capture without breaking flow.</h3>
+      <p>Snapwright stays warm in the background, so the overlay is there the instant you press the hotkey. The screen freezes, you pick a region, and it's copied and saved the moment you let go.</p>
+      <div class="specs">
+        <div><span>Region, window or full display</span><span>drag · hover · click</span></div>
+        <div><span>Pixel-perfect nudge and resize</span><span>← → · Shift + arrows</span></div>
+        <div><span>Copy any pixel as hex</span><span>C</span></div>
+        <div><span>Repeat last region, no overlay</span><span><span data-mod>⌘</span> <span data-alt>Option</span> Shift 2</span></div>
+      </div>
     </div>
-    <div class="shot"><img src="img/snap.png" alt="Hovering a window highlights it so one click captures exactly that window"></div>
-  </div>
-</div></section>
+    <figure>
+      <div><img src="img/overlay.png" alt="Selecting part of a dashboard with the size label and colour loupe" width="1600" height="1000" loading="lazy"></div>
+      <figcaption class="fig"><b>Fig. 2</b><span>Live size label and a colour loupe that reads the exact pixel under your pointer.</span></figcaption>
+    </figure>
+  </article>
 
-<section><div class="wrap">
-  <div class="split rev">
-    <div>
-      <h3>Every capture, instantly findable</h3>
-      <p>Snapwright remembers what you captured and where it came from. Each shot lands in the library
-      with the app, window title, display and time, so "that error from Tuesday" is one search away.</p>
-      <ul class="ticks">
-        <li>Full-text search across apps, titles, tags and notes</li>
-        <li>Tags and notes on any capture</li>
-        <li>Trash with restore, so nothing is lost by accident</li>
-        <li>Content-addressed storage: duplicates cost nothing</li>
-      </ul>
+  <article class="chapter" id="markup">
+    <div class="text">
+      <div class="num">02 / 03</div>
+      <h3>Say it with arrows.</h3>
+      <p>A focused editor with the tools you actually reach for. Every edit is non-destructive and saved beside the original, so you can change it next week or revert in one click.</p>
+      <div class="specs">
+        <div><span>Arrow · line · rectangle · ellipse</span><span>A&nbsp; L&nbsp; R&nbsp; E</span></div>
+        <div><span>Highlighter · text · numbered step</span><span>H&nbsp; T&nbsp; N</span></div>
+        <div><span>Blur and pixelate secrets</span><span>B&nbsp; P</span></div>
+        <div><span>Crop, 200 steps of undo</span><span>C · <span data-mod>⌘</span> Z</span></div>
+      </div>
     </div>
-    <div class="shot"><img src="img/library.png" alt="The Snapwright library: a grid of captures with search, tags and details"></div>
-  </div>
-</div></section>
+    <figure>
+      <div><img src="img/editor.png" alt="The editor with a numbered step, an arrow, text and a blurred value" width="1064" height="560" loading="lazy"></div>
+      <figcaption class="fig"><b>Fig. 3</b><span>Numbered steps, an arrow, a label, and a blurred number. Four keys.</span></figcaption>
+    </figure>
+  </article>
 
-<section class="alt"><div class="wrap">
-  <div class="split">
-    <div>
-      <h3>Say it with arrows</h3>
-      <p>A focused editor with the tools you actually reach for: arrows, shapes, highlighter, text,
-      numbered steps, blur and pixelate for anything private, and crop. Every tool is one key away.</p>
-      <ul class="ticks">
-        <li>Non-destructive: the original is never touched</li>
-        <li>200 steps of undo and redo</li>
-        <li>Revert to the original at any time</li>
-        <li>Redact secrets before they leave your screen</li>
-      </ul>
+  <article class="chapter" id="library">
+    <div class="text">
+      <div class="num">03 / 03</div>
+      <h3>Find it again.</h3>
+      <p>Each shot lands in a library with where it came from and the text inside it, so “that error from Tuesday” is one search away. It lives on your machine, not in someone's cloud.</p>
+      <div class="specs">
+        <div><span>Search apps, titles, tags, notes and the text in every shot</span><span>on-device OCR</span></div>
+        <div><span>Smooth with thousands of captures</span><span>virtual grid</span></div>
+        <div><span>Duplicates cost nothing</span><span>content-addressed</span></div>
+        <div><span>Trash with restore</span><span>undo-safe</span></div>
+      </div>
     </div>
-    <div class="shot"><img src="img/editor.png" alt="The Snapwright editor with arrows, a numbered step, text and a blurred area on a capture"></div>
-  </div>
-</div></section>
+    <figure>
+      <div><img src="img/library.png" alt="The library: a grid of captures with search, tags and details" width="1200" height="760" loading="lazy"></div>
+      <figcaption class="fig"><b>Fig. 4</b><span>Every capture keeps its app, window title, size, time and text. Tags and notes are yours.</span></figcaption>
+    </figure>
+  </article>
+</section>
 
-<section><div class="wrap">
-  <div class="section-head center" style="text-align:center"><h2>Everything a capture needs. <em>Nothing it doesn't.</em></h2>
-  <p>Small, sharp tools that work together, all in a single native app.</p></div>
-  <div class="grid">
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h3>Instant overlay</h3><p>A warm GPU pipeline and per-display overlays mean no spinner, no flash, no wait.</p></div>
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg></div><h3>Repeat last region</h3><p>Capture the same area again with one hotkey and no overlay. Perfect for before-and-after shots.</p></div>
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></div><h3>Delayed capture</h3><p>Start a countdown from the tray to catch menus, hovers and tooltips.</p></div>
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></div><h3>Quick-access preview</h3><p>A preview pops up after each capture. Click to open it, or jump straight into the editor.</p></div>
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></div><h3>Searchable library</h3><p>SQLite full-text search over every capture's app, window title, tags and notes.</p></div>
-    <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><path d="m3 3 18 18"/></svg></div><h3>Blur and pixelate</h3><p>Hide passwords, emails and tokens before you share. Your capture, your privacy.</p></div>
+<section class="wrap tools">
+  <div>
+    <div class="tools-intro">
+      <div class="label">Also in the box</div>
+      <h2>Small tools. One key each.</h2>
+      <div class="mini">
+        <figure><div><img src="img/countdown.png" alt="A three second countdown before a capture" width="1040" height="650" loading="lazy"></div><figcaption>Delayed capture</figcaption></figure>
+        <figure><div><img src="img/preview.png" alt="The quick-access preview after a capture" width="960" height="600" loading="lazy"></div><figcaption>Quick-access preview</figcaption></figure>
+      </div>
+    </div>
+    <div class="tool-list">
+      <div class="tool"><strong>Screen recording</strong><span class="k"><span data-mod>⌘</span> Shift 6</span><p>Record a display or a region to MP4, or to GIF with <span data-alt>Option</span> added. Pause when you need to; the video lands in your library.</p></div>
+      <div class="tool"><strong>Copy the text in a selection</strong><span class="k">T</span><p>Select a region and press T: the words in it go to your clipboard, read on your machine.</p></div>
+      <div class="tool"><strong>Snap to window</strong><span class="k">hover + click</span><p>The window under your pointer highlights. One click captures exactly that window.</p></div>
+      <div class="tool"><strong>Delayed capture</strong><span class="k">tray · 3 s</span><p>Catch menus, tooltips and hover states. The countdown is never in the shot.</p></div>
+      <div class="tool"><strong>Quick-access preview</strong><span class="k">after every capture</span><p>Click to open it in the library, or jump straight to the editor. It steps aside before your next shot.</p></div>
+      <div class="tool"><strong>Clipboard and file at once</strong><span class="k">PNG</span><p>Every capture is copied and saved to Pictures/Snapwright in the same instant.</p></div>
+      <div class="tool"><strong>Keyboard precision</strong><span class="k">Shift on release</span><p>Hold Shift as you let go to keep adjusting the selection before it's taken.</p></div>
+      <div class="next"><b>NEXT →</b><span>Wayland on GNOME &amp; KDE</span><span>Scrolling capture</span><span>Smart redaction</span><span>Pin to screen</span><span>Collections</span></div>
+    </div>
   </div>
-  <p style="text-align:center;margin-top:36px"><a class="btn" href="features.html">Explore all features</a></p>
-</div></section>
+</section>
 
-<section class="alt"><div class="wrap">
-  <div class="section-head center" style="text-align:center"><h2>Native on <em>every desk</em>.</h2>
-  <p>One codebase in Rust, using each operating system's fastest capture path. No Electron, no web view.</p></div>
+<section class="download" id="download"><div class="wrap">
+  <div class="label">Download</div>
+  <h2>Native on every desk.</h2>
+  <div class="lede-row">
+    <p class="lede">One Rust codebase using each system's fastest capture path. No Electron, no web view. Builds are published on GitHub as soon as they're cut.</p>
+    <div class="cta">
+      <a class="big-btn" href="https://github.com/jeremielumandong/Snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
+      <span class="cta-sub" data-dl-sub>Universal DMG · Apple silicon &amp; Intel</span>
+    </div>
+  </div>
   <div class="platforms">
-    <div class="card"><h3>macOS</h3><p>ScreenCaptureKit, the modern capture API, with Retina scaling handled for you.</p><small>Universal app for Apple silicon and Intel</small></div>
-    <div class="card"><h3>Windows</h3><p>DXGI Desktop Duplication with per-monitor DPI awareness, straight from the GPU.</p><small>Windows 10 and 11</small></div>
-    <div class="card"><h3>Linux</h3><p>X11 shared-memory capture. A full 1440p grab takes about 4 ms. Wayland is on the way.</p><small>AppImage</small></div>
+    <div class="platform" data-platform="mac">
+      <span class="name">macOS<span class="yours">YOUR SYSTEM</span></span>
+      <span class="api">ScreenCaptureKit · Retina-aware</span>
+      <span class="note">Apple silicon and Intel. Grant Screen Recording on first launch.</span>
+      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest">Universal DMG ↓</a>
+    </div>
+    <div class="platform" data-platform="windows">
+      <span class="name">Windows<span class="yours">YOUR SYSTEM</span></span>
+      <span class="api">DXGI Desktop Duplication · per-monitor DPI</span>
+      <span class="note">Windows 10 and 11. Lives in your tray, starts in milliseconds.</span>
+      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest">Installer · x64 ↓</a>
+    </div>
+    <div class="platform" data-platform="linux">
+      <span class="name">Linux<span class="yours">YOUR SYSTEM</span></span>
+      <span class="api">X11 shared memory · ~4 ms at 1440p</span>
+      <span class="note">X11, and Wayland on wlroots compositors such as Sway and Hyprland. GNOME and KDE are next.</span>
+      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest">AppImage · x86_64 ↓</a>
+    </div>
   </div>
-</div></section>
-
-<section class="final"><div class="wrap">
-  <div class="card">
-    <h2>Take your next screenshot <em>faster</em>.</h2>
-    <p class="lead">Snapwright is in early preview. Grab a build, press the hotkey, and feel the difference.</p>
-    <div class="cta"><a class="btn primary" href="download.html">Get Snapwright</a>
-    <a class="btn" href="https://github.com/jeremielumandong/Snapwright">Follow on GitHub</a></div>
+  <div class="source">
+    <div>
+      <h3>Build from source</h3>
+      <p>You need Rust; the toolchain is pinned in the repo. On Linux, install the GPUI dependencies first: <code>libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev</code></p>
+    </div>
+<pre><i>$ </i>git clone https://github.com/jeremielumandong/Snapwright.git
+<i>$ </i>cd Snapwright
+<i>$ </i>cargo run --release -p snapwright-app</pre>
   </div>
 </div></section>
 </main>
-<footer class="site"><div class="wrap">
-  <a class="brand" href="index.html"><img src="favicon.svg" alt="">Snapwright</a>
-  <span>Fast, organized screenshots for macOS, Windows and Linux.</span>
-  <nav><a href="features.html">Features</a><a href="download.html">Download</a><a href="https://github.com/jeremielumandong/Snapwright">GitHub</a></nav>
-</div></footer>
+
+<footer class="wrap site-footer">
+  <div class="row">
+    <span>Fast, organized screenshots for macOS, Windows and Linux.</span>
+    <nav><a href="#capture">Features</a><a href="#download">Download</a><a href="https://github.com/jeremielumandong/Snapwright/releases">Releases</a><a href="https://github.com/jeremielumandong/Snapwright">GitHub ↗</a></nav>
+  </div>
+  <div class="wordmark" aria-hidden="true">Snapwright</div>
+</footer>
+
+<script src="site.js" defer></script>
 </body>
 </html>
