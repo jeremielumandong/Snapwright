@@ -38,6 +38,8 @@ struct Toast {
     id: i64,
     thumb: PathBuf,
     size: (u32, u32),
+    /// For a recording: the video file and its length in milliseconds.
+    video: Option<(PathBuf, u64)>,
     hovered: bool,
     /// Bumped when the pointer leaves, so the time-left bar starts over.
     linger: usize,
@@ -65,6 +67,12 @@ impl Render for Toast {
                 window.remove_window();
                 cx.set_global(Open(None));
             }));
+        let video = self.video.clone();
+        let (action_icon, action_label) = if video.is_some() {
+            (IconName::Play, "Play")
+        } else {
+            (IconName::Pencil, "Edit")
+        };
         let edit = div()
             .id("toast-edit")
             .h(px(28.))
@@ -78,13 +86,16 @@ impl Render for Toast {
             .text_size(px(12.))
             .font_weight(FontWeight::MEDIUM)
             .text_color(hud::fg())
-            .child(Icon::new(IconName::Pencil).size(px(13.)))
-            .child("Edit")
+            .child(Icon::new(action_icon).size(px(13.)))
+            .child(action_label)
             .on_click(cx.listener(move |_, _, window, cx| {
                 cx.stop_propagation();
                 window.remove_window();
                 cx.set_global(Open(None));
-                crate::editor_view::open(id, cx);
+                match &video {
+                    Some((path, _)) => cx.open_with_system(path),
+                    None => crate::editor_view::open(id, cx),
+                }
             }));
         let check = div()
             .size(px(24.))
@@ -100,6 +111,13 @@ impl Render for Toast {
                     .text_color(hud::success()),
             );
         let (w, h) = self.size;
+        let (title, detail) = match &self.video {
+            Some((_, ms)) => (
+                "Recording saved",
+                format!("{} · {w} × {h} · click to open", clock(*ms)),
+            ),
+            None => ("Copied to clipboard", format!("{w} × {h} · click to open")),
+        };
         // The time left before the preview goes; full while the pointer holds it open.
         let bar = div()
             .absolute()
@@ -181,7 +199,7 @@ impl Render for Toast {
                                     .line_height(px(18.))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(hud::fg())
-                                    .child("Copied to clipboard"),
+                                    .child(title),
                             )
                             .child(
                                 div()
@@ -189,7 +207,7 @@ impl Render for Toast {
                                     .line_height(px(15.))
                                     .text_color(hud::fg3())
                                     .truncate()
-                                    .child(format!("{w} × {h} · click to open")),
+                                    .child(detail),
                             ),
                     )
                     .child(edit),
@@ -198,8 +216,25 @@ impl Render for Toast {
     }
 }
 
+/// `m:ss` (or `h:mm:ss`) for a length in milliseconds.
+pub fn clock(ms: u64) -> String {
+    let s = ms / 1000;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
 /// Shows the preview for capture `id` of `dims` pixels, replacing any preview already showing.
-pub fn show(id: i64, thumb: PathBuf, dims: (u32, u32), cx: &mut App) {
+/// `video` is a recording's file and length in milliseconds.
+pub fn show(
+    id: i64,
+    thumb: PathBuf,
+    dims: (u32, u32),
+    video: Option<(PathBuf, u64)>,
+    cx: &mut App,
+) {
     dismiss(cx);
     let mut hidden = false;
     // Wayland has no primary display; the layer-shell surface finds its corner there.
@@ -235,6 +270,7 @@ pub fn show(id: i64, thumb: PathBuf, dims: (u32, u32), cx: &mut App) {
             id,
             thumb,
             size: dims,
+            video,
             hovered: false,
             linger: 0,
         })
@@ -284,7 +320,7 @@ pub fn dismiss(cx: &mut App) -> bool {
 }
 
 /// Asks the OS to leave `window` out of screen captures. Returns whether it will.
-fn hide_from_capture(window: &Window) -> bool {
+pub fn hide_from_capture(window: &Window) -> bool {
     if snapwright_capture::EXCLUDES_OWN_WINDOWS {
         return true;
     }
@@ -300,4 +336,16 @@ fn hide_from_capture(window: &Window) -> bool {
     }
     let _ = window;
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clock;
+
+    #[test]
+    fn clock_formats_lengths() {
+        assert_eq!(clock(0), "0:00");
+        assert_eq!(clock(65_400), "1:05");
+        assert_eq!(clock(3_725_000), "1:02:05");
+    }
 }

@@ -184,6 +184,47 @@ the reference; `crates/app/src/theme.rs` holds its tokens.
   and the image drop shadow inside thumbnails (`object_fit` boxes have no fitted bounds to
   shadow).
 
+## 2026-10-13: Screen recording
+
+Jeremie asked for recording now (it was Phase 3). Choices made:
+
+- **Encoders are the OS's.** macOS: AVAssetWriter, which uses VideoToolbox (the media engine
+  on Apple silicon). Windows: a Media Foundation sink writer, which picks the GPU's H.264 MFT
+  (Quick Sync, NVENC, AMF) and falls back to Microsoft's software one. Both are licensed by
+  the OS vendor, so Snapwright ships no H.264 encoder and owes no patent royalties. Linux has
+  no system encoder, so MP4 goes through the user's `ffmpeg` (libx264); without it MP4 fails
+  with a clear message and GIF still works. Bundling openh264 was the alternative; Cisco's
+  royalty cover only applies to its own downloaded binary.
+- **Windows gets NV12 from us** (`yuv.rs`, BT.709 limited range), so the sink writer needs no
+  colour converter and colours match the other platforms. All three tag BT.709.
+- **The index comes first** (`shouldOptimizeForNetworkUse`, `MF_MPEG4SINK_MOOV_BEFORE_MDAT`,
+  `+faststart`): a recording pasted into Slack or a browser plays before it fully loads.
+- **Frames come from the warm `Capturer`**, one grab per tick on the capture thread and an
+  encoder on its own thread behind a 3-frame queue; a slow encode drops a frame rather than
+  slowing the clock. Timestamps are wall-clock minus pauses. On macOS this is one
+  `SCScreenshotManager` call per frame (about 15 ms, fine for 30 fps); an `SCStream` is the
+  follow-up for 60 fps.
+- **The pointer** is in recordings and not in screenshots (`Capturer::set_cursor`): native on
+  ScreenCaptureKit and wlr-screencopy, drawn from XFixes on X11 and from the DXGI pointer
+  shape on Windows (colour, monochrome and masked-colour shapes).
+- **GIF** is pure Rust (`gif` crate, NeuQuant per frame) at 15 fps, scaled down by a whole
+  factor to at most 1280 px wide, and writes only the rectangle that changed, with unchanged
+  pixels transparent. Still screens cost almost nothing.
+- **Hotkeys:** Ctrl/Cmd+Shift+6 records MP4 and Ctrl/Cmd+Alt/Option+Shift+6 a GIF; the same key
+  stops. Shift+5 is macOS's own recording toolbar. `--record` / `--record-gif` do the same
+  from the command line (and over the single-instance socket on Linux).
+- **The library keeps recordings as captures**: the first frame is the image (thumbnail,
+  grid, search all unchanged) and the video sits beside it in the store under its own hash,
+  hard-linked from `Movies/Snapwright` (schema version 3). Enter or Play opens the system
+  player; the editor is for images only.
+- **The bar** (time, Pause, Stop) goes under the area, else above, else inside it where the OS
+  keeps our windows out of captures (macOS; Windows with `WDA_EXCLUDEFROMCAPTURE`). On X11 it
+  is left out rather than recorded; on Wayland it is not shown yet (no anchor beside an
+  arbitrary area), and the compositor binding stops the recording.
+- **Main's red CI fixed here:** `Placement::BottomRight`'s margin is unread off Linux, and the
+  e2e script's expected overlay shade and editor image offset predate the UI refresh.
+
+No audio yet; it is the first follow-up.
 ## 2026-10-13: On-device OCR for search and copy text
 
 `snapwright-ocr` wraps what each OS has: Apple Vision (accurate level, language correction),
@@ -202,8 +243,7 @@ MIT/Apache). Nothing is sent anywhere.
   of the time (1 to 1.5 s for 1600x1000 on four cores).
 - The library stores the text of the image it shows (the edit when there is one) and which
   image that was (`ocr_hash`). An edit or revert makes the capture pending again, so blurring
-  a secret also takes it out of search. The column is added by a presence check rather than
-  a schema bump, so it does not collide with other branches' migrations.
+  a secret also takes it out of search. It is schema v4.
 - One worker thread owns the engine and blocks on a channel (0% idle). Library changes wake
   it; it waits for a quiet second, then reads pending captures newest first, which also
   backfills an existing library. `T` in the overlay sends the selection to the same worker

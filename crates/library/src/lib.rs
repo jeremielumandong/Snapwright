@@ -8,6 +8,10 @@
 //! * Edits never touch the original: the editor's scene (JSON) is stored with the capture and
 //!   its rendered result is a second image in the store, shown in place of the original.
 //!
+//! * A screen recording is a capture too: its first frame is the image (so thumbnails, search
+//!   and the grid treat it like any other) and the video file sits beside it in the store,
+//!   named by its own hash.
+//!
 //! * Text recognised in a capture (OCR, run by the app off the UI thread) is indexed with the
 //!   rest. It is read from the image shown, so an edit that blurs a password also takes the
 //!   password out of search; [`Library::pending_text`] lists what still needs reading.
@@ -109,6 +113,25 @@ pub struct EditedImage<'a> {
     pub height: u32,
 }
 
+/// A recording to add: its poster frame as a capture, and the finished video file, which is
+/// linked (or copied) into the store and left where it is.
+pub struct NewRecording<'a> {
+    pub poster: NewCapture<'a>,
+    pub video: &'a Path,
+    pub duration_ms: u64,
+}
+
+/// The video of a recording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Video {
+    /// BLAKE3 of the file, hex.
+    pub hash: String,
+    /// File extension without the dot (`mp4`, `gif`).
+    pub ext: String,
+    pub bytes: u64,
+    pub duration_ms: u64,
+}
+
 /// The edited version of a capture.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edit {
@@ -141,6 +164,8 @@ pub struct Capture {
     pub trashed: bool,
     /// The annotated version, if the capture was edited.
     pub edit: Option<Edit>,
+    /// The video, if this capture is a screen recording (the image is its first frame).
+    pub video: Option<Video>,
 }
 
 impl Capture {
@@ -193,7 +218,7 @@ pub struct Library {
     db: Connection,
 }
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 4;
 
 impl Library {
     /// Opens (creating if needed) the library in `root`.
@@ -252,6 +277,49 @@ impl Library {
         reindex(&tx, id)?;
         tx.commit()?;
         Ok(id)
+    }
+
+    /// Stores a screen recording: the poster frame as a capture, with the video hard-linked
+    /// into the store (copied when the store is on another file system). Returns the new id.
+    pub fn add_recording(&mut self, new: &NewRecording<'_>) -> Result<i64> {
+        let io = |source| Error::Io {
+            path: new.video.to_path_buf(),
+            source,
+        };
+        let mut hasher = blake3::Hasher::new();
+        hasher
+            .update_reader(std::fs::File::open(new.video).map_err(io)?)
+            .map_err(io)?;
+        let hash = hasher.finalize().to_hex().to_string();
+        let ext = new
+            .video
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp4")
+            .to_ascii_lowercase();
+        let bytes = std::fs::metadata(new.video).map_err(io)?.len();
+        store::link_once(new.video, &self.video_path(&hash, &ext))?;
+        let id = self.add(&new.poster)?;
+        self.db.execute(
+            "UPDATE captures SET video_hash = ?2, video_ext = ?3, video_bytes = ?4,
+                                 duration_ms = ?5
+             WHERE id = ?1",
+            params![id, hash, ext, bytes as i64, new.duration_ms as i64],
+        )?;
+        Ok(id)
+    }
+
+    /// Where a recording's video lives, if the capture is one.
+    pub fn video_path_of(&self, capture: &Capture) -> Option<PathBuf> {
+        let v = capture.video.as_ref()?;
+        Some(self.video_path(&v.hash, &v.ext))
+    }
+
+    fn video_path(&self, hash: &str, ext: &str) -> PathBuf {
+        self.root
+            .join("store")
+            .join(&hash[..2.min(hash.len())])
+            .join(format!("{hash}.{ext}"))
     }
 
     /// One capture by id, trashed or not.
@@ -457,6 +525,14 @@ impl Library {
     /// Returns how many captures were removed.
     pub fn purge_trash(&mut self) -> Result<usize> {
         let tx = self.db.transaction()?;
+        let videos: Vec<(String, String)> = {
+            let mut stmt = tx.prepare(
+                "SELECT video_hash, video_ext FROM captures
+                 WHERE deleted_ms IS NOT NULL AND video_hash IS NOT NULL",
+            )?;
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?
+        };
         let hashes: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT hash FROM captures WHERE deleted_ms IS NOT NULL
@@ -478,6 +554,12 @@ impl Library {
                 orphans.push(hash);
             }
         }
+        let mut orphan_videos = Vec::new();
+        for (hash, ext) in videos {
+            if !is_used(&tx, &hash)? {
+                orphan_videos.push((hash, ext));
+            }
+        }
         tx.execute(
             "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM capture_tags)",
             [],
@@ -486,6 +568,9 @@ impl Library {
         for hash in orphans {
             store::remove(&self.image_path(&hash));
             store::remove(&self.thumb_path(&hash));
+        }
+        for (hash, ext) in orphan_videos {
+            store::remove(&self.video_path(&hash, &ext));
         }
         Ok(n)
     }
@@ -585,7 +670,8 @@ impl Library {
 
 const COLUMNS: &str = "c.id, c.hash, c.created_ms, c.width, c.height, c.bytes, c.source, c.app,
     c.window_title, c.url, c.display_id, c.note, c.text, c.deleted_ms,
-    c.edit_hash, c.edit_width, c.edit_height, c.edit_bytes, c.scene";
+    c.edit_hash, c.edit_width, c.edit_height, c.edit_bytes, c.scene,
+    c.video_hash, c.video_ext, c.video_bytes, c.duration_ms";
 
 fn capture_from_row(r: &Row<'_>) -> rusqlite::Result<Capture> {
     Ok(Capture {
@@ -616,13 +702,23 @@ fn capture_from_row(r: &Row<'_>) -> rusqlite::Result<Capture> {
             }),
             None => None,
         },
+        video: match r.get::<_, Option<String>>(19)? {
+            Some(hash) => Some(Video {
+                hash,
+                ext: r.get::<_, Option<String>>(20)?.unwrap_or_default(),
+                bytes: r.get::<_, Option<i64>>(21)?.unwrap_or_default() as u64,
+                duration_ms: r.get::<_, Option<i64>>(22)?.unwrap_or_default() as u64,
+            }),
+            None => None,
+        },
     })
 }
 
-/// Whether any capture still uses the image `hash`, as its original or its edit.
+/// Whether any capture still uses the file `hash`, as its original, its edit or its video.
 fn is_used(db: &Connection, hash: &str) -> Result<bool> {
     Ok(db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM captures WHERE hash = ?1 OR edit_hash = ?1)",
+        "SELECT EXISTS (SELECT 1 FROM captures
+                        WHERE hash = ?1 OR edit_hash = ?1 OR video_hash = ?1)",
         [hash],
         |r| r.get(0),
     )?)
@@ -698,21 +794,28 @@ fn migrate(db: &Connection) -> Result<()> {
              COMMIT;",
         )?;
     }
-    // Which image the stored text was read from (NULL: not read yet). An additive column,
-    // checked by presence rather than by schema version so it does not race other branches'
-    // migrations; older builds ignore it.
-    if !has_column(db, "captures", "ocr_hash")? {
-        db.execute_batch("ALTER TABLE captures ADD COLUMN ocr_hash TEXT;")?;
+    if version < 3 {
+        db.execute_batch(
+            "BEGIN;
+             ALTER TABLE captures ADD COLUMN video_hash  TEXT;
+             ALTER TABLE captures ADD COLUMN video_ext   TEXT;
+             ALTER TABLE captures ADD COLUMN video_bytes INTEGER;
+             ALTER TABLE captures ADD COLUMN duration_ms INTEGER;
+             CREATE INDEX captures_video_hash ON captures (video_hash);
+             PRAGMA user_version = 3;
+             COMMIT;",
+        )?;
+    }
+    if version < 4 {
+        // Which image the stored text was read from (NULL: not read yet).
+        db.execute_batch(
+            "BEGIN;
+             ALTER TABLE captures ADD COLUMN ocr_hash TEXT;
+             PRAGMA user_version = 4;
+             COMMIT;",
+        )?;
     }
     Ok(())
-}
-
-fn has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
-    Ok(db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-        [table, column],
-        |r| r.get(0),
-    )?)
 }
 
 fn now_ms() -> i64 {

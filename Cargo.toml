@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/app", "crates/capture", "crates/cli", "crates/editor", "crates/library", "crates/ocr"]
+members = [
+    "crates/app",
+    "crates/capture",
+    "crates/cli",
+    "crates/editor",
+    "crates/library",
+    "crates/ocr",
+    "crates/record",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +22,7 @@ snapwright-capture = { path = "crates/capture" }
 snapwright-library = { path = "crates/library" }
 snapwright-editor = { path = "crates/editor" }
 snapwright-ocr = { path = "crates/ocr" }
+snapwright-record = { path = "crates/record" }
 
 # common
 anyhow = "1"
@@ -43,6 +52,9 @@ serde_json = "1"
 tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
 ab_glyph = "0.2"
 
+# recording: GIF encoding everywhere; MP4 goes through the OS encoder (or ffmpeg on Linux)
+gif = "0.14"
+
 # UI: gpui-kit is the facade over gpui (gpui-pre =0.3.8) + gpui-component 0.7.1, kept in
 # lockstep, as in Switchyard. `image` must match the version gpui links (its `Frame` type).
 gpui-kit = "=0.7.1"
@@ -54,7 +66,7 @@ global-hotkey = "0.8"
 arboard = { version = "3.6", default-features = false, features = ["image-data", "wayland-data-control"] }
 
 # Linux
-x11rb = { version = "0.14", features = ["randr", "shm"] }
+x11rb = { version = "0.14", features = ["randr", "shm", "xfixes"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
@@ -73,6 +85,9 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-screen-capture-kit = { version = "0.3", default-features = false, features = ["std", "block2", "libc", "objc2-core-foundation", "objc2-core-graphics", "SCShareableContent", "SCStream", "SCScreenshotManager"] }
 block2 = "0.6"
 objc2-vision = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-core-graphics", "VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "VNTypes"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-media", "objc2-core-video", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings", "AVAnimation"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferPool", "CVReturn"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -131,7 +131,7 @@ impl Backend {
         Ok(out)
     }
 
-    pub(crate) fn capture(&mut self, display: &Display) -> Result<Frame> {
+    pub(crate) fn capture(&mut self, display: &Display, cursor: bool) -> Result<Frame> {
         let output = self
             .state
             .outputs
@@ -146,7 +146,9 @@ impl Backend {
         }
         let qh = self.queue.handle();
         self.state.copy = Copy::default();
-        let frame = self.screencopy.capture_output(0, &output.wl, &qh, ());
+        let frame = self
+            .screencopy
+            .capture_output(i32::from(cursor), &output.wl, &qh, ());
         let result = self.copy_frame(&frame, display.id);
         frame.destroy();
         result

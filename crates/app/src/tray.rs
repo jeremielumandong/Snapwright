@@ -1,4 +1,4 @@
-//! The tray (menu bar) icon: Capture, Open captures folder, Quit.
+//! The tray (menu bar) icon: Capture, Record, Open captures folder, Quit.
 //!
 //! macOS and Windows use the native status item; Linux uses StatusNotifierItem over D-Bus
 //! (`tray-icon`'s `ksni` backend), so no GTK is needed. Menu clicks arrive on a platform
@@ -15,6 +15,8 @@ pub enum Action {
     Capture,
     CaptureDelayed,
     RepeatLast,
+    Record,
+    RecordGif,
     OpenLibrary,
     OpenFolder,
     Quit,
@@ -23,6 +25,24 @@ pub enum Action {
 /// Keeps the tray icon alive for the life of the app.
 pub struct Tray {
     _icon: TrayIcon,
+    record: MenuItem,
+    record_gif: MenuItem,
+    labels: Labels,
+}
+
+impl Tray {
+    /// Switches the record items between starting and stopping a recording.
+    pub fn set_recording(&self, recording: bool) {
+        if recording {
+            self.record
+                .set_text(with_shortcut("Stop recording", self.labels.record.as_ref()));
+            self.record_gif.set_enabled(false);
+        } else {
+            self.record
+                .set_text(with_shortcut("Record screen", self.labels.record.as_ref()));
+            self.record_gif.set_enabled(true);
+        }
+    }
 }
 
 impl gpui_kit::Global for Tray {}
@@ -30,6 +50,8 @@ impl gpui_kit::Global for Tray {}
 const ID_CAPTURE: &str = "capture";
 const ID_DELAYED: &str = "capture-delayed";
 const ID_REPEAT: &str = "repeat-last";
+const ID_RECORD: &str = "record";
+const ID_RECORD_GIF: &str = "record-gif";
 const ID_OPEN: &str = "open-folder";
 const ID_LIBRARY: &str = "library";
 const ID_QUIT: &str = "quit";
@@ -39,6 +61,8 @@ const ID_QUIT: &str = "quit";
 pub struct Labels {
     pub capture: Option<String>,
     pub repeat: Option<String>,
+    pub record: Option<String>,
+    pub record_gif: Option<String>,
 }
 
 fn with_shortcut(text: &str, shortcut: Option<&String>) -> String {
@@ -51,6 +75,18 @@ fn with_shortcut(text: &str, shortcut: Option<&String>) -> String {
 /// Creates the tray icon. Call on the main thread once the app is running.
 pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)> {
     let menu = Menu::new();
+    let record = MenuItem::with_id(
+        ID_RECORD,
+        with_shortcut("Record screen", labels.record.as_ref()),
+        true,
+        None,
+    );
+    let record_gif = MenuItem::with_id(
+        ID_RECORD_GIF,
+        with_shortcut("Record GIF", labels.record_gif.as_ref()),
+        true,
+        None,
+    );
     menu.append_items(&[
         &MenuItem::with_id(
             ID_CAPTURE,
@@ -65,6 +101,9 @@ pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)
             true,
             None,
         ),
+        &PredefinedMenuItem::separator(),
+        &record,
+        &record_gif,
         &PredefinedMenuItem::separator(),
         &MenuItem::with_id(ID_LIBRARY, "Open library", true, None),
         &MenuItem::with_id(ID_OPEN, "Open captures folder", true, None),
@@ -96,7 +135,15 @@ pub fn create(labels: &Labels) -> Result<(Tray, mpsc::UnboundedReceiver<Action>)
         ICON_SIZE,
     )?);
     let icon = builder.build()?;
-    Ok((Tray { _icon: icon }, rx))
+    Ok((
+        Tray {
+            _icon: icon,
+            record,
+            record_gif,
+            labels: labels.clone(),
+        },
+        rx,
+    ))
 }
 
 fn action_for(id: &MenuId) -> Option<Action> {
@@ -104,6 +151,8 @@ fn action_for(id: &MenuId) -> Option<Action> {
         ID_CAPTURE => Some(Action::Capture),
         ID_DELAYED => Some(Action::CaptureDelayed),
         ID_REPEAT => Some(Action::RepeatLast),
+        ID_RECORD => Some(Action::Record),
+        ID_RECORD_GIF => Some(Action::RecordGif),
         ID_LIBRARY => Some(Action::OpenLibrary),
         ID_OPEN => Some(Action::OpenFolder),
         ID_QUIT => Some(Action::Quit),
@@ -165,6 +214,11 @@ mod tests {
         assert_eq!(
             action_for(&MenuId::new(ID_REPEAT)),
             Some(Action::RepeatLast)
+        );
+        assert_eq!(action_for(&MenuId::new(ID_RECORD)), Some(Action::Record));
+        assert_eq!(
+            action_for(&MenuId::new(ID_RECORD_GIF)),
+            Some(Action::RecordGif)
         );
         assert_eq!(action_for(&MenuId::new(ID_OPEN)), Some(Action::OpenFolder));
         assert_eq!(

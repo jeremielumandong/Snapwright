@@ -60,6 +60,28 @@ pub fn captures_dir() -> Result<PathBuf> {
     Ok(base.join("Snapwright"))
 }
 
+/// The folder recordings are saved to: `Movies/Snapwright` (`Videos` on Windows and Linux),
+/// or `~/Snapwright` without one.
+pub fn recordings_dir() -> Result<PathBuf> {
+    let dirs = directories::UserDirs::new().context("no home directory")?;
+    let base = dirs
+        .video_dir()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs.home_dir().to_path_buf());
+    Ok(base.join("Snapwright"))
+}
+
+/// A new file name for a recording in the recordings folder (created if needed).
+pub fn recording_path(extension: &str) -> Result<PathBuf> {
+    let dir = recordings_dir()?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    Ok(dir.join(format!("Snapwright {ms}.{extension}")))
+}
+
 /// Where the capture library lives: the platform's data folder for Snapwright.
 pub fn library_dir() -> Result<PathBuf> {
     let dirs = directories::ProjectDirs::from("", "", "Snapwright").context("no home directory")?;
