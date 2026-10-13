@@ -85,6 +85,9 @@ Gate: 1,000 beta users and 99.5% crash-free sessions.
       the editor has a tool rail with shortcuts, a floating colour/size bar and keycap hints;
       overlay, loupe, preview and countdown share one dark HUD material with keycap hints.
 - [ ] OCR index (Vision, Windows.Media.Ocr, `ocrs`); collections; pin to screen.
+      Note: OCR done (`snapwright-ocr`): every capture's text is indexed for search (backfills
+      the existing library, re-reads after edits), the inspector shows it with Copy text, and
+      `T` in the overlay copies the text of a selection. Collections and pin remain.
 - [ ] Scrolling capture; smart redaction; beautifier; export formats; HDR tone mapping.
 
 ## Phase 3: v1.0 (weeks 27 to 36)
@@ -149,3 +152,6 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
   exclude our windows; check that this feels right on X11 and Windows.
 - UI: light mode was checked against the design only through code; screenshot it on a light
   desktop.
+- OCR: show a short "Text copied" HUD after `T` (today only the log says so); highlight the
+  matching words on the image when a search hit came from its text.
+- OCR: video transcripts for recordings; a language setting for Vision and Windows OCR.

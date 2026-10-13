@@ -17,8 +17,8 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context, Entity,
-    FocusHandle, Focusable as _, FontWeight, Global, InteractiveElement as _, IntoElement,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, ClipboardItem, Context,
+    Entity, FocusHandle, Focusable as _, FontWeight, Global, InteractiveElement as _, IntoElement,
     KeyDownEvent, ListAlignment, ListState, ObjectFit, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, TitlebarOptions,
     Window, WindowBounds, WindowOptions, div, img, list, point, px, size,
@@ -48,8 +48,15 @@ const DELAY_SECS: u32 = 3;
 pub struct LibraryChanged(pub u64);
 impl Global for LibraryChanged {}
 
-/// Records that the library changed.
+/// Records that the library changed: an open window reloads, and new or edited captures
+/// get their text read.
 pub fn notify_changed(cx: &mut App) {
+    reload_open(cx);
+    crate::ocr::wake(cx);
+}
+
+/// Makes an open library window reload.
+pub fn reload_open(cx: &mut App) {
     let next = cx.default_global::<LibraryChanged>().0 + 1;
     cx.set_global(LibraryChanged(next));
 }
@@ -1211,6 +1218,7 @@ impl LibraryView {
                         }),
                 )
                 .child(meta)
+                .when(!c.text.is_empty(), |d| d.child(self.render_text(c, p, cx)))
                 .child(
                     div()
                         .flex()
@@ -1230,6 +1238,58 @@ impl LibraryView {
         )
         .child(footer)
         .into_any_element()
+    }
+}
+
+impl LibraryView {
+    /// The text read from the capture, the first lines of it, with a link to copy it all.
+    fn render_text(&self, c: &Capture, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let (lines, more) = excerpt(&c.text, TEXT_LINES);
+        let all = c.text.clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(theme::section_label("Text", p))
+                    .child(
+                        div()
+                            .id("copy-text")
+                            .cursor_pointer()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(p.accent)
+                            .hover(|d| d.text_color(p.fg))
+                            .child("Copy text")
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(all.clone()));
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .text_size(px(12.))
+                    .text_color(p.fg2)
+                    .children(
+                        lines
+                            .into_iter()
+                            .map(|l| div().min_w_0().truncate().child(l.to_owned())),
+                    )
+                    .when(more > 0, |d| {
+                        d.child(
+                            div()
+                                .text_color(p.fg3)
+                                .child(format!("and {more} more {}", plural(more, "line"))),
+                        )
+                    }),
+            )
     }
 }
 
@@ -1456,6 +1516,24 @@ fn when(ms: i64) -> String {
         .unwrap_or_default()
 }
 
+/// Lines of recognised text the inspector shows.
+const TEXT_LINES: usize = 8;
+
+/// The first `max` non-empty lines of `text`, and how many more there are.
+fn excerpt(text: &str, max: usize) -> (Vec<&str>, usize) {
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let shown: Vec<&str> = lines.by_ref().take(max).collect();
+    (shown, lines.count())
+}
+
+fn plural(n: usize, word: &str) -> String {
+    if n == 1 {
+        word.to_owned()
+    } else {
+        format!("{word}s")
+    }
+}
+
 fn human_bytes(n: u64) -> String {
     match n {
         n if n >= 1 << 20 => format!("{:.1} MB", n as f64 / f64::from(1 << 20)),
@@ -1558,6 +1636,15 @@ mod tests {
             Some("2")
         );
         assert!(hotkey_keys("Ctrl+Shift+2").contains(&"⇧".to_owned()));
+    }
+
+    #[test]
+    fn text_excerpts_skip_blank_lines_and_count_the_rest() {
+        let (shown, more) = excerpt("one\n\n  two \nthree\nfour", 2);
+        assert_eq!((shown, more), (vec!["one", "two"], 2));
+        assert_eq!(excerpt("", 8), (vec![], 0));
+        assert_eq!(plural(1, "line"), "line");
+        assert_eq!(plural(3, "line"), "lines");
     }
 
     #[test]

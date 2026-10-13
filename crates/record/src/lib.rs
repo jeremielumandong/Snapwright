@@ -12,6 +12,8 @@
 //! Timestamps are wall-clock time since the start, minus time spent paused.
 
 mod encoder;
+#[cfg(any(target_os = "windows", test))]
+mod faststart;
 #[cfg(target_os = "linux")]
 mod ffmpeg;
 mod gif;

@@ -8,18 +8,16 @@ use std::time::Duration;
 
 use snapwright_capture::Frame;
 use windows::Win32::Media::MediaFoundation::{
-    IMFAttributes, IMFByteStream, IMFSinkWriter, MF_ACCESSMODE_READWRITE, MF_FILEFLAGS_NONE,
-    MF_MPEG4SINK_MOOV_BEFORE_MDAT, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE,
+    IMFAttributes, IMFSinkWriter, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE,
     MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_PIXEL_ASPECT_RATIO,
-    MF_MT_SUBTYPE, MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_YUV_MATRIX, MF_OPENMODE_DELETE_IF_EXIST,
-    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_VERSION, MFCreateAttributes, MFCreateFile,
-    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
-    MFMediaType_Video, MFNominalRange_16_235, MFSTARTUP_FULL, MFShutdown, MFStartup,
-    MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
-    MFVideoTransferMatrix_BT709,
+    MF_MT_SUBTYPE, MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_YUV_MATRIX,
+    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_VERSION, MFCreateAttributes, MFCreateMediaType,
+    MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL, MFMediaType_Video,
+    MFNominalRange_16_235, MFSTARTUP_FULL, MFShutdown, MFStartup, MFVideoFormat_H264,
+    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoTransferMatrix_BT709,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
-use windows::core::{HSTRING, w};
+use windows::core::HSTRING;
 
 use crate::encoder::{Encoder, bitrate};
 use crate::{RecordError, Result};
@@ -53,10 +51,6 @@ impl Drop for Runtime {
 pub(crate) struct MfEncoder {
     // Field order is drop order: the writer goes before the runtime shuts down.
     writer: IMFSinkWriter,
-    /// The output file, opened for reading too: putting the index first means reading the
-    /// samples back, which a sink writer opened from a path cannot (Finalize fails with
-    /// E_ACCESSDENIED).
-    file: IMFByteStream,
     stream: u32,
     width: u32,
     height: u32,
@@ -84,7 +78,7 @@ impl MfEncoder {
         let rate = (u64::from(fps) << 32) | 1;
         // SAFETY: plain Media Foundation object creation and attribute setters on objects
         // this function owns; GUID pointers are to statics.
-        let (writer, file, stream) = unsafe {
+        let (writer, stream) = unsafe {
             let mut attrs: Option<IMFAttributes> = None;
             MFCreateAttributes(&mut attrs, 2).map_err(|e| err("MFCreateAttributes", e))?;
             let attrs = attrs.ok_or_else(|| RecordError::Encoder {
@@ -94,20 +88,8 @@ impl MfEncoder {
             attrs
                 .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
                 .map_err(|e| err("SetUINT32", e))?;
-            // The index before the data, so the file plays while it downloads.
-            attrs
-                .SetUINT32(&MF_MPEG4SINK_MOOV_BEFORE_MDAT, 1)
-                .map_err(|e| err("SetUINT32", e))?;
             let url = HSTRING::from(path.as_os_str());
-            let file = MFCreateFile(
-                MF_ACCESSMODE_READWRITE,
-                MF_OPENMODE_DELETE_IF_EXIST,
-                MF_FILEFLAGS_NONE,
-                &url,
-            )
-            .map_err(|e| err("MFCreateFile", e))?;
-            // With a byte stream the URL only picks the container, by its extension.
-            let writer = MFCreateSinkWriterFromURL(w!(".mp4"), &file, &attrs)
+            let writer = MFCreateSinkWriterFromURL(&url, None, &attrs)
                 .map_err(|e| err("MFCreateSinkWriterFromURL", e))?;
 
             let out = MFCreateMediaType().map_err(|e| err("MFCreateMediaType", e))?;
@@ -139,11 +121,10 @@ impl MfEncoder {
             writer
                 .BeginWriting()
                 .map_err(|e| err("IMFSinkWriter::BeginWriting", e))?;
-            (writer, file, stream)
+            (writer, stream)
         };
         Ok(Self {
             writer,
-            file,
             stream,
             width,
             height,
@@ -247,9 +228,12 @@ impl Encoder for MfEncoder {
             api: "IMFSinkWriter::Finalize",
             message: format!("{}: {e}", self.path.display()),
         })?;
-        // SAFETY: closing the file we opened; the sink is finished with it. The MPEG-4 sink
-        // may have closed it already, so a second close's error means nothing.
-        let _ = unsafe { self.file.Close() };
-        Ok(())
+        // The index before the data, so the file plays while it downloads. Media Foundation's
+        // own option for this (MF_MPEG4SINK_MOOV_BEFORE_MDAT) fails to finalise a file opened
+        // by path, and through a read-write byte stream it drops the mdat header.
+        // Release the writer and its file first, or Windows refuses to replace the file.
+        let path = self.path.clone();
+        drop(self);
+        crate::faststart::faststart(&path)
     }
 }

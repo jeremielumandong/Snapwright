@@ -1,8 +1,8 @@
 //! The selection overlay: one borderless window per display showing that display's frozen
 //! frame. Hover highlights a window, a click takes it, a drag selects a region; see
 //! [`crate::selection`] for the whole interaction. A loupe beside the pointer shows the pixels
-//! under it and their colour; `C` copies that colour as hex. Esc cancels. In record mode the
-//! selection is the area to record.
+//! under it and their colour; `C` copies that colour as hex, `T` the text in the selection (or
+//! the hovered window). Esc cancels. In record mode the selection is the area to record.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -14,6 +14,8 @@ use gpui_kit::{
     Size, Styled as _, Window, div, hsla, img, px, size,
 };
 use snapwright_capture::{Frame, Rect};
+
+use gpui_kit::prelude::FluentBuilder as _;
 
 use crate::selection::{Arrow, Outcome, Selector};
 use crate::session::{self, Mode, SnapTarget};
@@ -125,6 +127,18 @@ impl Overlay {
         }
     }
 
+    /// The pixels of `r`, clipped to the frame, and the clipped rectangle.
+    fn crop(&self, r: Rect) -> Option<(Rect, Frame)> {
+        let bytes = self.image.as_bytes(0)?;
+        // Crop straight from the image's pixels: one copy of the selected rows only.
+        let r = r.intersect(&Rect::new(0, 0, self.width, self.height))?;
+        let stride = self.width as usize * 4;
+        let start = r.y as usize * stride + r.x as usize * 4;
+        let rows = bytes.get(start..)?;
+        let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
+        Some((r, frame))
+    }
+
     fn deliver(&mut self, r: Rect, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.mode, Mode::Record(_)) {
             let Some(r) = r.intersect(&Rect::new(0, 0, self.width, self.height)) else {
@@ -135,21 +149,20 @@ impl Overlay {
             session::deliver_recording(self.display_id, r, meta, window, cx);
             return;
         }
-        let Some(bytes) = self.image.as_bytes(0) else {
+        let Some((r, frame)) = self.crop(r) else {
             return;
         };
-        // Crop straight from the image's pixels: one copy of the selected rows only.
-        let Some(r) = r.intersect(&Rect::new(0, 0, self.width, self.height)) else {
-            return;
-        };
-        let stride = self.width as usize * 4;
-        let start = r.y as usize * stride + r.x as usize * 4;
-        let Some(rows) = bytes.get(start..) else {
-            return;
-        };
-        let frame = Frame::from_bgrx_rows(self.display_id, r.width, r.height, stride, rows);
         let meta = session::describe(r, self.width, self.height, &self.targets, self.display_id);
         session::deliver(frame, r, meta, self.pressed_at, window, cx);
+    }
+
+    /// Copies the text in the selection (or the hovered window) instead of its pixels.
+    fn copy_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((_, frame)) = self.crop(self.selector.region()) else {
+            return;
+        };
+        session::finish(window, cx);
+        crate::ocr::copy_text(frame, cx);
     }
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -195,6 +208,9 @@ impl Overlay {
                     cx.write_to_clipboard(ClipboardItem::new_string(hex));
                     session::finish(window, cx);
                 }
+            }
+            "t" if !mods.control && !mods.platform && !matches!(self.mode, Mode::Record(_)) => {
+                self.copy_text(window, cx)
             }
             _ => {}
         }
@@ -352,6 +368,9 @@ impl Overlay {
                     &["enter"],
                     if recording { "Record" } else { "Copy" },
                 ))
+                .when(!recording, |bar| {
+                    bar.child(theme::hud_hint(&["T"], "Copy text"))
+                })
                 .child(theme::hud_hint(&["escape"], "Cancel"))
         } else if recording {
             let what = match self.mode {
@@ -374,6 +393,7 @@ impl Overlay {
             bar.child("Click a window or drag a region")
                 .child(theme::hud_hint(&["shift"], "Adjust"))
                 .child(theme::hud_hint(&["C"], "Copy colour"))
+                .child(theme::hud_hint(&["T"], "Copy text"))
                 .child(theme::hud_hint(&["escape"], "Cancel"))
         };
         let row = div().absolute().left_0().w_full().flex().justify_center();
