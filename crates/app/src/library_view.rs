@@ -4,32 +4,43 @@
 //! Queries run on a background thread against the shared [`Library`]; results land here
 //! tagged with a generation number so a slow, stale query never overwrites a newer one.
 
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::component::Sizable as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use chrono::{Datelike as _, NaiveDate};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::{Button, ButtonVariants as _, DropdownButton};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, FocusHandle, FontWeight,
-    Global, InteractiveElement as _, IntoElement, KeyDownEvent, ObjectFit, ParentElement as _,
-    Render, SharedString, StatefulInteractiveElement as _, Styled as _, StyledImage as _,
-    Subscription, TitlebarOptions, UniformListScrollHandle, Window, WindowBounds, WindowOptions,
-    div, img, px, size, uniform_list,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context, Entity,
+    FocusHandle, Focusable as _, FontWeight, Global, InteractiveElement as _, IntoElement,
+    KeyDownEvent, ListAlignment, ListState, ObjectFit, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, StyledImage as _, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowOptions, div, img, list, point, px, size,
 };
 use snapwright_library::{Capture, Library, Query, Source};
 
-use crate::editor_view;
 use crate::session::{self, LibraryService};
+use crate::theme::{self, Palette};
+use crate::{assets, countdown, editor_view, hotkey, toast};
 
-const SIDEBAR_W: f32 = 200.;
-const DETAIL_W: f32 = 320.;
-const CELL_W: f32 = 196.;
-const CELL_H: f32 = 188.;
-const THUMB_H: f32 = 120.;
-const GAP: f32 = 12.;
+const SIDEBAR_W: f32 = 216.;
+const DETAIL_W: f32 = 340.;
+/// Grid padding on each side, and the gaps between cells.
+const GRID_PAD: f32 = 20.;
+const COL_GAP: f32 = 16.;
+const ROW_GAP: f32 = 20.;
+/// Narrowest a grid cell gets before a column is dropped.
+const MIN_CELL_W: f32 = 180.;
+const THUMB_H: f32 = 124.;
+const HEADER_H: f32 = 52.;
+/// Delay for the capture menu's "Capture in 3 seconds".
+const DELAY_SECS: u32 = 3;
 
 /// Bumped whenever the library changes outside this window (a new capture), so an open
 /// library window reloads.
@@ -143,7 +154,7 @@ pub struct LibraryView {
     library: Arc<Mutex<Library>>,
     search: Entity<InputState>,
     new_tag: Entity<InputState>,
-    note: Entity<InputState>,
+    note: Entity<TextareaState>,
     filter: Filter,
     items: Vec<Item>,
     tags: Vec<(String, usize)>,
@@ -152,9 +163,15 @@ pub struct LibraryView {
     selected: Option<i64>,
     /// The note field shows another capture's note; refreshed on the next render.
     note_stale: bool,
+    /// The "Add tag" chip has turned into a text field.
+    adding_tag: bool,
     generation: u64,
     grid_focus: FocusHandle,
-    scroll: UniformListScrollHandle,
+    /// The grid as day headers and rows of cells, for `columns` per row.
+    rows: Vec<Row>,
+    columns: usize,
+    cell_w: f32,
+    list: ListState,
     /// Item to scroll into view on the next render.
     scroll_to: Option<usize>,
     /// Clear the search box on the next render (which then reloads).
@@ -164,10 +181,16 @@ pub struct LibraryView {
 
 impl LibraryView {
     fn new(library: Arc<Mutex<Library>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search = cx
-            .new(|cx| InputState::new(window, cx).placeholder("Search apps, titles, tags, notes…"));
-        let new_tag = cx.new(|cx| InputState::new(window, cx).placeholder("Add tag"));
-        let note = cx.new(|cx| InputState::new(window, cx).placeholder("Note (Enter saves)"));
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search apps, titles, tags, notes, text in images")
+        });
+        let new_tag = cx.new(|cx| InputState::new(window, cx).placeholder("Tag name"));
+        let note = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(3, 8)
+                .placeholder("Add a note")
+        });
         let subs = vec![
             cx.subscribe_in(&search, window, |this, _, ev: &InputEvent, _, cx| {
                 if let InputEvent::Change = ev {
@@ -177,21 +200,33 @@ impl LibraryView {
             cx.subscribe_in(
                 &new_tag,
                 window,
-                |this, input, ev: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = ev {
-                        let name = input.read(cx).value().to_string();
+                |this, input, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::PressEnter { .. } => {
+                        let name = input.read(cx).value().trim().to_string();
                         input.update(cx, |s, cx| s.set_value("", window, cx));
-                        this.edit(cx, move |lib, id| lib.tag(id, &name));
+                        if !name.is_empty() {
+                            this.edit(cx, move |lib, id| lib.tag(id, &name));
+                        }
                     }
+                    InputEvent::Blur => {
+                        this.adding_tag = false;
+                        cx.notify();
+                    }
+                    _ => {}
                 },
             ),
+            // The note saves when it loses focus.
             cx.subscribe_in(&note, window, |this, input, ev: &InputEvent, _, cx| {
-                if let InputEvent::PressEnter { .. } = ev {
+                if let InputEvent::Blur = ev {
                     let text = input.read(cx).value().to_string();
-                    this.edit(cx, move |lib, id| lib.set_note(id, &text));
+                    let unchanged = this.selected_item().is_some_and(|i| i.capture.note == text);
+                    if !unchanged {
+                        this.edit(cx, move |lib, id| lib.set_note(id, &text));
+                    }
                 }
             }),
             cx.observe_global_in::<LibraryChanged>(window, |this, _, cx| this.reload(cx)),
+            cx.observe_window_appearance(window, |_, window, cx| theme::sync(window, cx)),
         ];
         let grid_focus = cx.focus_handle();
         window.focus(&grid_focus, cx);
@@ -207,9 +242,13 @@ impl LibraryView {
             trashed: 0,
             selected: None,
             note_stale: false,
+            adding_tag: false,
             generation: 0,
             grid_focus,
-            scroll: UniformListScrollHandle::new(),
+            rows: Vec::new(),
+            columns: 0,
+            cell_w: MIN_CELL_W,
+            list: ListState::new(0, ListAlignment::Top, px(400.)),
             scroll_to: None,
             search_reset: false,
             _subs: subs,
@@ -292,6 +331,8 @@ impl LibraryView {
                             }
                         }
                         this.items = l.items;
+                        // Lay the grid out again on the next render.
+                        this.columns = 0;
                         this.tags = l.tags;
                         this.total = l.total;
                         this.trashed = l.trashed;
@@ -361,6 +402,7 @@ impl LibraryView {
 
     fn select(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
         self.selected = Some(id);
+        self.adding_tag = false;
         let note = self
             .selected_item()
             .map(|i| i.capture.note.clone())
@@ -394,7 +436,21 @@ impl LibraryView {
 
     fn on_key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let mods = e.keystroke.modifiers;
-        match e.keystroke.key.as_str() {
+        let key = e.keystroke.key.as_str();
+        if key == "f" && mods.secondary() {
+            let focus = self.search.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+            cx.stop_propagation();
+            return;
+        }
+        // Keys typed into the search field, tag field or note are theirs.
+        if !self.grid_focus.is_focused(window) {
+            if key == "escape" {
+                window.focus(&self.grid_focus, cx);
+            }
+            return;
+        }
+        match key {
             "delete" | "backspace" => self.trash_or_restore(cx),
             "c" if mods.secondary() => self.copy_selected(cx),
             "enter" | "e" if !mods.secondary() => {
@@ -403,24 +459,21 @@ impl LibraryView {
                 }
             }
             key @ ("left" | "right" | "up" | "down") => {
-                let columns = self.columns(window);
-                let step: isize = match key {
-                    "left" => -1,
-                    "right" => 1,
-                    "up" => -(columns as isize),
-                    _ => columns as isize,
-                };
                 let at = self
                     .selected
                     .and_then(|id| self.items.iter().position(|i| i.capture.id == id));
-                let next = match at {
-                    None => 0,
-                    Some(i) => (i as isize + step).clamp(0, self.items.len() as isize - 1) as usize,
+                let next = match (at, key) {
+                    (None, _) => Some(0),
+                    (Some(i), "left") => Some(i.saturating_sub(1)),
+                    (Some(i), "right") => Some((i + 1).min(self.items.len().saturating_sub(1))),
+                    (Some(i), "up") => step_vertical(&self.rows, i, true),
+                    (Some(i), _) => step_vertical(&self.rows, i, false),
                 };
-                if let Some(id) = self.items.get(next).map(|i| i.capture.id) {
+                if let Some(next) = next
+                    && let Some(id) = self.items.get(next).map(|i| i.capture.id)
+                {
                     self.select(id, window, cx);
-                    self.scroll
-                        .scroll_to_item(next / columns, gpui_kit::ScrollStrategy::Center);
+                    self.scroll_to = Some(next);
                 }
             }
             _ => {}
@@ -428,43 +481,100 @@ impl LibraryView {
     }
 
     /// Thumbnails per grid row at the current window width.
-    fn columns(&self, window: &Window) -> usize {
-        let width = f32::from(window.viewport_size().width) - SIDEBAR_W - DETAIL_W - GAP * 2.;
-        ((width + GAP) / (CELL_W + GAP)).floor().max(1.) as usize
+    /// Thumbnails per grid row and their width at the current window width.
+    fn columns_for(window: &Window) -> (usize, f32) {
+        let width = f32::from(window.viewport_size().width) - SIDEBAR_W - DETAIL_W - GRID_PAD * 2.;
+        let columns = ((width + COL_GAP) / (MIN_CELL_W + COL_GAP)).floor().max(1.);
+        let cell_w = (width - COL_GAP * (columns - 1.)) / columns;
+        (columns as usize, cell_w.max(MIN_CELL_W))
     }
 
-    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let row = |id: SharedString, label: String, active: bool| {
+    /// Lays the grid out again when the items or the column count changed.
+    fn layout_grid(&mut self, window: &Window) {
+        let (columns, cell_w) = Self::columns_for(window);
+        self.cell_w = cell_w;
+        if columns == self.columns {
+            return;
+        }
+        self.columns = columns;
+        let days: Vec<NaiveDate> = self
+            .items
+            .iter()
+            .map(|i| local_day(i.capture.created_ms))
+            .collect();
+        self.rows = layout_rows(&days, columns, local_today());
+        self.list.reset(self.rows.len());
+    }
+
+    /// Starts a capture from the library window, keeping the window out of it where the OS
+    /// would not.
+    fn capture(how: CaptureKind, window: &mut Window, cx: &mut App) {
+        let hide = !snapwright_capture::EXCLUDES_OWN_WINDOWS;
+        if hide {
+            window.minimize_window();
+        }
+        cx.spawn(async move |cx| {
+            if hide {
+                cx.background_executor().timer(toast::SETTLE).await;
+            }
+            cx.update(|cx| match how {
+                CaptureKind::Region => session::start(Instant::now(), cx),
+                CaptureKind::Delayed => countdown::start(DELAY_SECS, cx),
+                CaptureKind::Repeat => session::repeat_last(Instant::now(), cx),
+            });
+        })
+        .detach();
+    }
+
+    fn render_sidebar(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let row = |id: SharedString, icon: IconName, label: String, count: usize, active: bool| {
             div()
                 .id(id)
-                .px(px(10.))
-                .py(px(6.))
+                .h(px(30.))
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .px(px(8.))
                 .rounded(px(6.))
-                .text_size(px(13.))
                 .cursor_pointer()
-                .when(active, |d| {
-                    d.bg(theme.sidebar_accent)
-                        .text_color(theme.sidebar_accent_foreground)
-                })
-                .hover(|d| d.bg(theme.sidebar_accent))
-                .child(label)
+                .when(active, |d| d.bg(p.sel).font_weight(FontWeight::MEDIUM))
+                .when(!active, |d| d.text_color(p.fg2).hover(|d| d.bg(p.hover)))
+                .child(Icon::new(icon).size(px(15.)))
+                .child(div().flex_1().truncate().child(label))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.fg3)
+                        .font_weight(FontWeight::NORMAL)
+                        .child(count.to_string()),
+                )
         };
-        let mut side = div()
-            .w(px(SIDEBAR_W))
-            .h_full()
+        let brand = div()
+            .h(px(HEADER_H))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .px(px(16.))
+            .child(img(assets::BRAND).size(px(22.)).rounded(px(5.)))
+            .child(
+                div()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Snapwright"),
+            );
+        let nav = div()
             .flex()
             .flex_col()
-            .gap(px(2.))
-            .p(px(8.))
-            .bg(theme.sidebar)
-            .text_color(theme.sidebar_foreground)
-            .border_r_1()
-            .border_color(theme.sidebar_border)
+            .gap(px(1.))
+            .px(px(8.))
+            .py(px(4.))
             .child(
                 row(
                     "all".into(),
-                    format!("All captures  {}", self.total),
+                    IconName::Images,
+                    "All captures".into(),
+                    self.total,
                     self.filter == Filter::All,
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::All, cx))),
@@ -472,60 +582,175 @@ impl LibraryView {
             .child(
                 row(
                     "trash".into(),
-                    format!("Trash  {}", self.trashed),
+                    IconName::Trash,
+                    "Trash".into(),
+                    self.trashed,
                     self.filter == Filter::Trash,
                 )
                 .on_click(cx.listener(|this, _, _, cx| this.set_filter(Filter::Trash, cx))),
             );
-        if !self.tags.is_empty() {
-            side = side.child(
-                div()
-                    .mt(px(14.))
-                    .mb(px(4.))
-                    .px(px(10.))
-                    .text_size(px(11.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.muted_foreground)
-                    .child("TAGS"),
-            );
-        }
+        let mut tags = div().flex().flex_col().gap(px(1.)).px(px(8.));
         for (i, (tag, n)) in self.tags.iter().enumerate() {
             let active = self.filter == Filter::Tag(tag.clone());
             let name = tag.clone();
-            side = side.child(
-                row(format!("tag-{i}").into(), format!("#{tag}  {n}"), active).on_click(
-                    cx.listener(move |this, _, _, cx| {
+            tags =
+                tags.child(
+                    row(
+                        format!("tag-{i}").into(),
+                        IconName::Hash,
+                        tag.clone(),
+                        *n,
+                        active,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_filter(Filter::Tag(name.clone()), cx)
-                    }),
-                ),
-            );
+                    })),
+                );
         }
-        side
+        div()
+            .w(px(SIDEBAR_W))
+            .h_full()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .bg(p.panel)
+            .border_r_1()
+            .border_color(p.line)
+            .child(brand)
+            .child(nav)
+            .when(!self.tags.is_empty(), |d| {
+                d.child(
+                    theme::section_label("Tags", p)
+                        .pt(px(18.))
+                        .pb(px(6.))
+                        .px(px(16.)),
+                )
+                .child(tags)
+            })
+            .child(div().flex_1())
+            .child(self.render_hotkey_card(p, cx))
     }
 
-    fn render_cell(&self, item: &Item, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+    /// How to take a capture: the hotkey as keycaps, or the compositor binding on Wayland.
+    fn render_hotkey_card(&self, p: &Palette, cx: &App) -> impl IntoElement {
+        let label = cx
+            .try_global::<hotkey::Registered>()
+            .and_then(|h| h.label(hotkey::Action::Capture))
+            .map(str::to_owned);
+        let body = match label {
+            Some(label) => div()
+                .flex()
+                .gap(px(4.))
+                .children(hotkey_keys(&label).into_iter().map(|k| theme::keycap(k, p)))
+                .into_any_element(),
+            None => div()
+                .text_size(px(11.5))
+                .text_color(p.fg3)
+                .child("Bind snapwright-app --capture-now to a key in your compositor")
+                .into_any_element(),
+        };
+        div()
+            .m(px(12.))
+            .p(px(12.))
+            .rounded(px(8.))
+            .border_1()
+            .border_color(p.line)
+            .bg(p.bg)
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Capture a region"),
+            )
+            .child(body)
+    }
+
+    fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let search_key = if cfg!(target_os = "macos") {
+            "⌘F".to_owned()
+        } else {
+            format!("{} F", theme::key_label("secondary"))
+        };
+        let search = div()
+            .flex_1()
+            .h(px(32.))
+            .flex()
+            .items_center()
+            .px(px(10.))
+            .rounded(px(8.))
+            .bg(p.hover)
+            .child(
+                Input::new(&self.search)
+                    .appearance(false)
+                    .cleanable(true)
+                    .prefix(Icon::new(IconName::Search).size(px(15.)).text_color(p.fg3))
+                    .suffix(theme::key_hint(search_key, p)),
+            );
+        let capture = DropdownButton::new("capture")
+            .primary()
+            .button(
+                Button::new("capture-region")
+                    .icon(Icon::new(IconName::Scan))
+                    .label("Capture")
+                    .on_click(|_, window, cx| Self::capture(CaptureKind::Region, window, cx)),
+            )
+            .dropdown_menu(|menu, _, _| {
+                menu.item(
+                    PopupMenuItem::new("Capture region")
+                        .icon(Icon::new(IconName::Scan))
+                        .on_click(|_, window, cx| Self::capture(CaptureKind::Region, window, cx)),
+                )
+                .item(
+                    PopupMenuItem::new(format!("Capture in {DELAY_SECS} seconds"))
+                        .icon(Icon::new(IconName::Timer))
+                        .on_click(|_, window, cx| Self::capture(CaptureKind::Delayed, window, cx)),
+                )
+                .item(
+                    PopupMenuItem::new("Repeat last region")
+                        .icon(Icon::new(IconName::Repeat2))
+                        .on_click(|_, window, cx| Self::capture(CaptureKind::Repeat, window, cx)),
+                )
+            });
+        div()
+            .h(px(HEADER_H))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .px(px(16.))
+            .border_b_1()
+            .border_color(p.line)
+            .child(search)
+            .when(
+                self.filter == Filter::Trash && !self.items.is_empty(),
+                |d| {
+                    d.child(
+                        Button::new("empty-trash")
+                            .danger()
+                            .label("Empty Trash")
+                            .on_click(cx.listener(|this, _, _, cx| this.empty_trash(cx))),
+                    )
+                },
+            )
+            .child(capture)
+    }
+
+    fn render_cell(&self, item: &Item, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let c = &item.capture;
         let selected = self.selected == Some(c.id);
         let id = c.id;
-        let caption = caption(c);
+        let (w, h) = c.shown_size();
         div()
             .id(("capture", c.id as u64))
-            .w(px(CELL_W))
-            .h(px(CELL_H - GAP))
+            .group("cell")
+            .w(px(self.cell_w))
+            .flex_none()
             .flex()
             .flex_col()
-            .gap(px(4.))
-            .p(px(6.))
-            .rounded(px(8.))
-            .border_2()
-            .border_color(if selected {
-                theme.primary
-            } else {
-                gpui_kit::transparent_black()
-            })
-            .when(selected, |d| d.bg(theme.list_active))
-            .hover(|d| d.bg(theme.list_hover))
+            .gap(px(8.))
             .cursor_pointer()
             .on_click(
                 cx.listener(move |this, e: &gpui_kit::ClickEvent, window, cx| {
@@ -540,153 +765,232 @@ impl LibraryView {
             )
             .child(
                 div()
+                    .relative()
                     .h(px(THUMB_H))
                     .w_full()
-                    .rounded(px(4.))
-                    .bg(theme.muted)
+                    .p(px(10.))
                     .overflow_hidden()
+                    .rounded(px(10.))
+                    .bg(p.thumb)
+                    .border_1()
+                    .border_color(p.line)
+                    .when(selected, |d| d.shadow(ring(p)))
+                    .when(!selected, |d| {
+                        d.group_hover("cell", |d| d.border_color(p.line2))
+                    })
+                    .child(fitted(item.thumb.clone()))
+                    .when(c.edit.is_some(), |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left(px(8.))
+                                .top(px(8.))
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .px(px(7.))
+                                .rounded(px(5.))
+                                .bg(gpui_kit::hsla(240. / 360., 0.09, 0.1, 0.78))
+                                .text_size(px(11.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(gpui_kit::white())
+                                .child(Icon::new(IconName::Pencil).size(px(11.)))
+                                .child("Edited"),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .px(px(2.))
+                    .min_w_0()
                     .child(
-                        img(item.thumb.clone())
-                            .size_full()
-                            .object_fit(ObjectFit::Contain),
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .truncate()
+                            .text_color(if selected { p.accent } else { p.fg })
+                            .child(title(c)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(6.))
+                            .text_size(px(12.))
+                            .text_color(p.fg3)
+                            .child(div().flex_1().min_w_0().truncate().child(cell_meta(c)))
+                            .child(format!("{w}×{h}")),
                     ),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(theme.foreground)
-                    .truncate()
-                    .child(caption),
-            )
-            .child(
-                div()
-                    .text_size(px(11.))
-                    .text_color(theme.muted_foreground)
-                    .truncate()
-                    .child(format!(
-                        "{}  ·  {}×{}",
-                        when(c.created_ms),
-                        c.width,
-                        c.height
-                    )),
             )
     }
 
-    fn render_grid(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+    fn render_row(&self, ix: usize, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        match self.rows.get(ix) {
+            Some(Row::Day { label, count }) => div()
+                .flex()
+                .items_baseline()
+                .gap(px(8.))
+                .px(px(GRID_PAD))
+                .pt(px(14.))
+                .pb(px(12.))
+                .child(div().font_weight(FontWeight::SEMIBOLD).child(label.clone()))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.fg3)
+                        .child(captures(*count)),
+                )
+                .into_any_element(),
+            Some(Row::Cells(range)) => {
+                let cells: Vec<AnyElement> = self.items[range.clone()]
+                    .iter()
+                    .map(|item| self.render_cell(item, p, cx).into_any_element())
+                    .collect();
+                div()
+                    .flex()
+                    .gap(px(COL_GAP))
+                    .px(px(GRID_PAD))
+                    .pb(px(ROW_GAP))
+                    .children(cells)
+                    .into_any_element()
+            }
+            None => div().into_any_element(),
+        }
+    }
+
+    fn render_grid(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         if self.items.is_empty() {
             let message = match (&self.filter, self.search.read(cx).value().is_empty()) {
                 (Filter::Trash, _) => "The trash is empty.".to_owned(),
                 (_, false) => "No captures match.".to_owned(),
-                _ => format!(
-                    "No captures yet. Press {} to take one.",
-                    if cfg!(target_os = "macos") {
-                        "Cmd+Shift+2"
-                    } else {
-                        "Ctrl+Shift+2"
-                    }
-                ),
+                _ => "No captures yet. Take one with the Capture button or the hotkey.".to_owned(),
             };
             return div()
                 .flex_1()
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(theme.muted_foreground)
+                .text_color(p.fg3)
                 .child(message)
                 .into_any_element();
         }
-        let columns = self.columns(window);
-        let rows = self.items.len().div_ceil(columns);
-        uniform_list(
-            "grid",
-            rows,
-            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
-                range
-                    .map(|row| {
-                        let start = row * columns;
-                        let end = (start + columns).min(this.items.len());
-                        let cells: Vec<Item> = this.items[start..end].to_vec();
-                        let rendered: Vec<_> = cells
-                            .iter()
-                            .map(|item| this.render_cell(item, cx).into_any_element())
-                            .collect();
-                        div()
-                            .h(px(CELL_H))
-                            .flex()
-                            .gap(px(GAP))
-                            .px(px(GAP))
-                            .children(rendered)
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .track_scroll(&self.scroll)
+        let view = cx.entity();
+        let p = *p;
+        list(self.list.clone(), move |ix, _, cx| {
+            view.update(cx, |this, cx| this.render_row(ix, &p, cx))
+        })
         .flex_1()
-        .pt(px(GAP))
+        .pt(px(4.))
         .into_any_element()
     }
 
-    fn render_detail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+    fn render_detail(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let pane = div()
             .w(px(DETAIL_W))
             .h_full()
+            .flex_none()
             .flex()
             .flex_col()
-            .gap(px(10.))
-            .p(px(12.))
             .border_l_1()
-            .border_color(theme.border)
-            .bg(theme.background);
+            .border_color(p.line)
+            .bg(p.bg);
         let Some(item) = self.selected_item() else {
             return pane
-                .text_color(theme.muted_foreground)
-                .text_size(px(13.))
+                .items_center()
+                .justify_center()
+                .text_color(p.fg3)
                 .child("Select a capture to see it here.")
                 .into_any_element();
         };
         let c = &item.capture;
-        let line = |label: &str, value: String| {
+        let line = |label: &'static str, value: AnyElement| {
             div()
                 .flex()
-                .gap(px(8.))
-                .text_size(px(12.))
-                .child(
-                    div()
-                        .w(px(64.))
-                        .text_color(theme.muted_foreground)
-                        .child(label.to_owned()),
-                )
-                .child(div().flex_1().truncate().child(value))
+                .items_center()
+                .child(div().w(px(84.)).flex_none().text_color(p.fg3).child(label))
+                .child(div().flex_1().min_w_0().truncate().child(value))
         };
-        let source = match c.meta.source {
-            Source::Region => "Region",
-            Source::Window => "Window",
-            Source::Display => "Whole display",
-            Source::Import => "Imported",
+        let text = |s: String| div().child(s).into_any_element();
+        let (source_icon, source) = match c.meta.source {
+            Source::Region => (IconName::SquareDashed, "Region"),
+            Source::Window => (IconName::AppWindow, "Window"),
+            Source::Display => (IconName::Monitor, "Whole display"),
+            Source::Import => (IconName::FileImage, "Imported"),
         };
-        let mut tags = div().flex().flex_wrap().gap(px(6.));
-        for (i, tag) in c.tags.iter().enumerate() {
-            let name = tag.clone();
-            tags = tags.child(
+        let (w, h) = c.shown_size();
+        let meta = div()
+            .flex()
+            .flex_col()
+            .gap(px(9.))
+            .text_size(px(12.5))
+            .child(line("Captured", text(when(c.created_ms))))
+            .child(line("Dimensions", text(format!("{w} × {h} px"))))
+            .child(line("File size", text(human_bytes(c.shown_bytes()))))
+            .child(line(
+                "Source",
                 div()
-                    .id(("tag-chip", i))
                     .flex()
                     .items_center()
-                    .gap(px(4.))
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(10.))
-                    .bg(theme.secondary)
+                    .gap(px(6.))
+                    .child(Icon::new(source_icon).size(px(13.)).text_color(p.fg2))
+                    .child(source)
+                    .into_any_element(),
+            ))
+            .when(c.edit.is_some(), |d| {
+                d.child(line(
+                    "Edits",
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child("Annotated")
+                        .child(
+                            div()
+                                .id("revert")
+                                .cursor_pointer()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(p.accent)
+                                .hover(|d| d.text_color(p.fg))
+                                .child("Revert")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.edit(cx, |lib, id| lib.revert_edit(id));
+                                })),
+                        )
+                        .into_any_element(),
+                ))
+            })
+            .when(!c.meta.url.is_empty(), |d| {
+                d.child(line("URL", text(c.meta.url.clone())))
+            });
+
+        let mut chips = div().flex().flex_wrap().gap(px(6.));
+        for (i, tag) in c.tags.iter().enumerate() {
+            let name = tag.clone();
+            chips = chips.child(
+                div()
+                    .h(px(24.))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.))
+                    .pl(px(9.))
+                    .pr(px(4.))
+                    .rounded(px(6.))
+                    .bg(p.hover)
                     .text_size(px(12.))
-                    .child(format!("#{tag}"))
+                    .child(tag.clone())
                     .child(
                         div()
                             .id(("untag", i))
+                            .size(px(16.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
                             .cursor_pointer()
-                            .text_color(theme.muted_foreground)
-                            .child("×")
+                            .text_color(p.fg3)
+                            .hover(|d| d.text_color(p.fg).bg(p.sel))
+                            .child(Icon::new(IconName::X).size(px(11.)))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let name = name.clone();
                                 this.edit(cx, move |lib, id| lib.untag(id, &name));
@@ -694,109 +998,175 @@ impl LibraryView {
                     ),
             );
         }
+        chips = if self.adding_tag {
+            chips.child(div().w(px(140.)).child(Input::new(&self.new_tag).small()))
+        } else {
+            chips.child(
+                div()
+                    .id("add-tag")
+                    .h(px(24.))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .px(px(9.))
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_dashed()
+                    .border_color(p.line2)
+                    .text_size(px(12.))
+                    .text_color(p.fg3)
+                    .cursor_pointer()
+                    .hover(|d| d.text_color(p.fg))
+                    .child(Icon::new(IconName::Plus).size(px(11.)))
+                    .child("Add tag")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.adding_tag = true;
+                        let focus = this.new_tag.read(cx).focus_handle(cx);
+                        window.focus(&focus, cx);
+                        cx.notify();
+                    })),
+            )
+        };
+
+        let icon_button = |id: &'static str, icon: IconName, tip: &'static str| {
+            Button::new(id).outline().icon(Icon::new(icon)).tooltip(tip)
+        };
+        let actions = div()
+            .flex()
+            .gap(px(6.))
+            .px(px(16.))
+            .py(px(12.))
+            .border_b_1()
+            .border_color(p.line)
+            .child(
+                Button::new("copy")
+                    .primary()
+                    .flex_1()
+                    .icon(Icon::new(IconName::Copy))
+                    .label("Copy")
+                    .on_click(cx.listener(|this, _, _, cx| this.copy_selected(cx))),
+            )
+            .child(
+                Button::new("edit")
+                    .outline()
+                    .flex_1()
+                    .icon(Icon::new(IconName::Pencil))
+                    .label("Edit")
+                    .tooltip("Annotate, redact or crop (E)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(id) = this.selected {
+                            editor_view::open(id, cx);
+                        }
+                    })),
+            )
+            .child(
+                icon_button("open", IconName::ExternalLink, "Open").on_click(cx.listener(
+                    |this, _, _, cx| {
+                        if let Some(item) = this.selected_item() {
+                            cx.open_with_system(&item.image);
+                        }
+                    },
+                )),
+            )
+            .child(
+                icon_button("reveal", IconName::FolderOpen, "Show file").on_click(cx.listener(
+                    |this, _, _, cx| {
+                        if let Some(item) = this.selected_item() {
+                            cx.reveal_path(&item.image);
+                        }
+                    },
+                )),
+            );
+
+        let footer = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .px(px(16.))
+            .py(px(10.))
+            .border_t_1()
+            .border_color(p.line)
+            .child(
+                div()
+                    .id("trash-restore")
+                    .h(px(28.))
+                    .ml(px(-8.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(8.))
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(p.hover))
+                    .text_size(px(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(if c.trashed { p.fg } else { p.danger })
+                    .child(Icon::new(IconName::Trash).size(px(14.)))
+                    .child(if c.trashed {
+                        "Restore"
+                    } else {
+                        "Move to Trash"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.trash_or_restore(cx))),
+            )
+            .child(div().flex_1())
+            .child(theme::key_hint(theme::key_label("backspace").to_owned(), p));
+
         pane.child(
             div()
-                .h(px(200.))
-                .w_full()
-                .rounded(px(6.))
-                .bg(theme.muted)
-                .overflow_hidden()
-                .child(
-                    img(item.image.clone())
-                        .size_full()
-                        .object_fit(ObjectFit::Contain),
-                ),
+                .h(px(212.))
+                .flex_none()
+                .p(px(20.))
+                .bg(p.canvas)
+                .border_b_1()
+                .border_color(p.line)
+                .child(fitted(item.image.clone())),
         )
+        .child(actions)
         .child(
             div()
-                .text_size(px(14.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(caption(c)),
-        )
-        .child(line("Taken", when(c.created_ms)))
-        .child(line("Size", {
-            let (w, h) = c.shown_size();
-            format!("{w} × {h} px")
-        }))
-        .child(line("File", human_bytes(c.shown_bytes())))
-        .when(c.edit.is_some(), |d| {
-            d.child(line(
-                "Edited",
-                "Annotations can still be changed".to_owned(),
-            ))
-        })
-        .child(line("Source", source.to_owned()))
-        .when(!c.meta.url.is_empty(), |d| {
-            d.child(line("URL", c.meta.url.clone()))
-        })
-        .child(tags)
-        .child(Input::new(&self.new_tag).small())
-        .child(Input::new(&self.note).small())
-        .child(
-            div()
+                .id("detail-body")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
                 .flex()
-                .flex_wrap()
-                .gap(px(6.))
+                .flex_col()
+                .gap(px(20.))
+                .p(px(16.))
                 .child(
-                    Button::new("copy")
-                        .primary()
-                        .small()
-                        .label("Copy")
-                        .on_click(cx.listener(|this, _, _, cx| this.copy_selected(cx))),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.))
+                        .child(
+                            div()
+                                .text_size(px(15.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(title(c)),
+                        )
+                        .when(!c.meta.app.is_empty(), |d| {
+                            d.child(div().text_color(p.fg2).child(c.meta.app.clone()))
+                        }),
+                )
+                .child(meta)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(theme::section_label("Tags", p))
+                        .child(chips),
                 )
                 .child(
-                    Button::new("edit")
-                        .small()
-                        .label("Edit")
-                        .tooltip("Annotate, redact or crop (E)")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(id) = this.selected {
-                                editor_view::open(id, cx);
-                            }
-                        })),
-                )
-                .when(c.edit.is_some(), |d| {
-                    d.child(
-                        Button::new("revert")
-                            .small()
-                            .label("Revert to original")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.edit(cx, |lib, id| lib.revert_edit(id));
-                            })),
-                    )
-                })
-                .child(
-                    Button::new("open")
-                        .small()
-                        .label("Open")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(item) = this.selected_item() {
-                                cx.open_with_system(&item.image);
-                            }
-                        })),
-                )
-                .child(
-                    Button::new("reveal")
-                        .small()
-                        .label("Show file")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(item) = this.selected_item() {
-                                cx.reveal_path(&item.image);
-                            }
-                        })),
-                )
-                .child(
-                    Button::new("trash-restore")
-                        .small()
-                        .when(!c.trashed, |b| b.danger())
-                        .label(if c.trashed {
-                            "Restore"
-                        } else {
-                            "Move to Trash"
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.trash_or_restore(cx))),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(theme::section_label("Note", p))
+                        .child(Textarea::new(&self.note)),
                 ),
         )
+        .child(footer)
         .into_any_element()
     }
 }
@@ -815,71 +1185,202 @@ impl Render for LibraryView {
             self.search.update(cx, |s, cx| s.set_value("", window, cx));
             self.reload(cx);
         }
-        if let Some(ix) = self.scroll_to.take() {
-            let columns = self.columns(window);
-            self.scroll
-                .scroll_to_item(ix / columns, gpui_kit::ScrollStrategy::Center);
+        self.layout_grid(window);
+        if let Some(ix) = self.scroll_to.take()
+            && let Some(row) = row_of(&self.rows, ix)
+        {
+            self.list.scroll_to_reveal_item(row);
         }
-        let theme = cx.theme();
-        let header = div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .px(px(GAP))
-            .py(px(8.))
-            .border_b_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .flex_1()
-                    .child(Input::new(&self.search).cleanable(true)),
-            )
-            .when(
-                self.filter == Filter::Trash && !self.items.is_empty(),
-                |d| {
-                    d.child(
-                        Button::new("empty-trash")
-                            .danger()
-                            .small()
-                            .label("Empty Trash")
-                            .on_click(cx.listener(|this, _, _, cx| this.empty_trash(cx))),
-                    )
-                },
-            );
+        let p = theme::palette(cx);
         div()
             .size_full()
             .flex()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .child(self.render_sidebar(cx))
+            .bg(p.bg)
+            .text_color(p.fg)
+            .text_size(px(13.))
+            .child(self.render_sidebar(&p, cx))
             .child(
                 div()
                     .id("grid-area")
                     .flex_1()
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
                     .track_focus(&self.grid_focus)
                     .on_key_down(cx.listener(Self::on_key_down))
-                    .child(header)
-                    .child(self.render_grid(window, cx)),
+                    .child(self.render_header(&p, cx))
+                    .child(self.render_grid(&p, cx)),
             )
-            .child(self.render_detail(cx))
+            .child(self.render_detail(&p, cx))
     }
 }
 
-/// The app and window title, or what kind of capture it was.
-fn caption(c: &Capture) -> String {
-    match (c.meta.app.is_empty(), c.meta.window_title.is_empty()) {
-        (false, false) => format!("{} — {}", c.meta.app, c.meta.window_title),
-        (false, true) => c.meta.app.clone(),
-        (true, false) => c.meta.window_title.clone(),
-        (true, true) => match c.meta.source {
+/// What the capture button and its menu start.
+#[derive(Debug, Clone, Copy)]
+enum CaptureKind {
+    Region,
+    Delayed,
+    Repeat,
+}
+
+/// A row of the grid: a day's header, or the cells (item indexes) of one row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Row {
+    Day { label: String, count: usize },
+    Cells(Range<usize>),
+}
+
+/// The grid for items taken on `days` (newest first), `columns` to a row, under a header
+/// for each day.
+fn layout_rows(days: &[NaiveDate], columns: usize, today: NaiveDate) -> Vec<Row> {
+    let columns = columns.max(1);
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while start < days.len() {
+        let day = days[start];
+        let end = days[start..]
+            .iter()
+            .position(|d| *d != day)
+            .map_or(days.len(), |n| start + n);
+        rows.push(Row::Day {
+            label: day_label(day, today),
+            count: end - start,
+        });
+        let mut at = start;
+        while at < end {
+            let next = (at + columns).min(end);
+            rows.push(Row::Cells(at..next));
+            at = next;
+        }
+        start = end;
+    }
+    rows
+}
+
+/// The grid row holding item `ix`.
+fn row_of(rows: &[Row], ix: usize) -> Option<usize> {
+    rows.iter()
+        .position(|r| matches!(r, Row::Cells(range) if range.contains(&ix)))
+}
+
+/// The item above or below item `ix`, in the same column where the next row is long enough
+/// (day headers are skipped).
+fn step_vertical(rows: &[Row], ix: usize, up: bool) -> Option<usize> {
+    let at = row_of(rows, ix)?;
+    let Row::Cells(here) = &rows[at] else {
+        return None;
+    };
+    let column = ix - here.start;
+    let mut others: Box<dyn Iterator<Item = &Row>> = if up {
+        Box::new(rows[..at].iter().rev())
+    } else {
+        Box::new(rows[at + 1..].iter())
+    };
+    others.find_map(|r| match r {
+        Row::Cells(range) => Some((range.start + column).min(range.end - 1)),
+        Row::Day { .. } => None,
+    })
+}
+
+fn local_day(ms: i64) -> NaiveDate {
+    use chrono::TimeZone as _;
+    chrono::Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .map_or(NaiveDate::MIN, |t| t.date_naive())
+}
+
+fn local_today() -> NaiveDate {
+    chrono::Local::now().date_naive()
+}
+
+/// "Today", "Yesterday", the weekday within a week, then the date.
+fn day_label(day: NaiveDate, today: NaiveDate) -> String {
+    match (today - day).num_days() {
+        0 => "Today".to_owned(),
+        1 => "Yesterday".to_owned(),
+        2..=6 => day.format("%A").to_string(),
+        _ if day.year() == today.year() => day.format("%-d %B").to_string(),
+        _ => day.format("%-d %B %Y").to_string(),
+    }
+}
+
+fn captures(n: usize) -> String {
+    if n == 1 {
+        "1 capture".to_owned()
+    } else {
+        format!("{n} captures")
+    }
+}
+
+/// An image scaled to fit inside its parent's padding, centred.
+fn fitted(path: PathBuf) -> impl IntoElement {
+    div().size_full().relative().child(
+        img(path)
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .object_fit(ObjectFit::Contain),
+    )
+}
+
+/// The selection ring around a grid thumbnail: the accent, then a soft halo.
+fn ring(p: &Palette) -> Vec<BoxShadow> {
+    let spread = |color, width: f32| BoxShadow {
+        color,
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: px(width),
+        inset: false,
+    };
+    vec![spread(p.accent_soft, 5.), spread(p.accent, 2.)]
+}
+
+/// A hotkey label like `Ctrl+Shift+2` as keycaps.
+fn hotkey_keys(label: &str) -> Vec<String> {
+    label
+        .split('+')
+        .map(|k| match k {
+            "Cmd" | "Command" | "Super" if cfg!(target_os = "macos") => "⌘".to_owned(),
+            "Alt" | "Option" if cfg!(target_os = "macos") => "⌥".to_owned(),
+            "Ctrl" if cfg!(target_os = "macos") => "⌃".to_owned(),
+            "Shift" => "⇧".to_owned(),
+            other => other.to_owned(),
+        })
+        .collect()
+}
+
+/// What a capture shows: its window title, else its app, else what kind of capture it was.
+pub(crate) fn title(c: &Capture) -> String {
+    if !c.meta.window_title.is_empty() {
+        c.meta.window_title.clone()
+    } else if !c.meta.app.is_empty() {
+        c.meta.app.clone()
+    } else {
+        match c.meta.source {
             Source::Display => "Whole display".to_owned(),
             Source::Window => "Window".to_owned(),
             Source::Import => "Imported image".to_owned(),
             Source::Region => "Region".to_owned(),
-        },
+        }
+    }
+}
+
+/// The line under a grid thumbnail's title: the app (when the title is not already the app)
+/// and the time.
+fn cell_meta(c: &Capture) -> String {
+    use chrono::TimeZone as _;
+    let time = chrono::Local
+        .timestamp_millis_opt(c.created_ms)
+        .single()
+        .map(|t| t.format("%H:%M").to_string())
+        .unwrap_or_default();
+    if c.meta.app.is_empty() || c.meta.window_title.is_empty() {
+        time
+    } else {
+        format!("{} · {time}", c.meta.app)
     }
 }
 
@@ -929,13 +1430,71 @@ mod tests {
     }
 
     #[test]
-    fn captions_prefer_app_and_title() {
+    fn titles_lead_with_the_window_title() {
+        assert_eq!(title(&capture("Figma", "Login", Source::Window)), "Login");
+        assert_eq!(title(&capture("Figma", "", Source::Region)), "Figma");
+        assert_eq!(title(&capture("", "", Source::Display)), "Whole display");
+        assert!(cell_meta(&capture("Figma", "Login", Source::Window)).starts_with("Figma · "));
+        assert!(!cell_meta(&capture("Figma", "", Source::Region)).contains("Figma"));
+    }
+
+    fn day(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, d).unwrap()
+    }
+
+    #[test]
+    fn grid_rows_group_by_day() {
+        let days = [day(12), day(12), day(12), day(11), day(1)];
+        let rows = layout_rows(&days, 2, day(12));
         assert_eq!(
-            caption(&capture("Figma", "Login", Source::Window)),
-            "Figma — Login"
+            rows,
+            vec![
+                Row::Day {
+                    label: "Today".into(),
+                    count: 3
+                },
+                Row::Cells(0..2),
+                Row::Cells(2..3),
+                Row::Day {
+                    label: "Yesterday".into(),
+                    count: 1
+                },
+                Row::Cells(3..4),
+                Row::Day {
+                    label: "1 October".into(),
+                    count: 1
+                },
+                Row::Cells(4..5),
+            ]
         );
-        assert_eq!(caption(&capture("Figma", "", Source::Region)), "Figma");
-        assert_eq!(caption(&capture("", "", Source::Display)), "Whole display");
+        assert_eq!(row_of(&rows, 2), Some(2));
+        assert_eq!(day_label(day(8), day(12)), "Thursday");
+        assert_eq!(
+            day_label(NaiveDate::from_ymd_opt(2025, 3, 4).unwrap(), day(12)),
+            "4 March 2025"
+        );
+    }
+
+    #[test]
+    fn arrows_move_between_rows_across_days() {
+        let days = [day(12), day(12), day(12), day(11), day(11)];
+        let rows = layout_rows(&days, 2, day(12));
+        // Down from the second column of a full row into a one-item row: the last item.
+        assert_eq!(step_vertical(&rows, 1, false), Some(2));
+        // Down across the day header keeps the column.
+        assert_eq!(step_vertical(&rows, 2, false), Some(3));
+        assert_eq!(step_vertical(&rows, 4, true), Some(2));
+        assert_eq!(step_vertical(&rows, 0, true), None);
+        assert_eq!(step_vertical(&rows, 4, false), None);
+    }
+
+    #[test]
+    fn hotkeys_read_as_keycaps() {
+        assert_eq!(
+            hotkey_keys("Ctrl+Shift+2").last().map(String::as_str),
+            Some("2")
+        );
+        assert!(hotkey_keys("Ctrl+Shift+2").contains(&"⇧".to_owned()));
     }
 
     #[test]

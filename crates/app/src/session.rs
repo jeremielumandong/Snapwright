@@ -65,11 +65,85 @@ const X11_SHIFT: f32 = 2.0;
 /// Bounds to request for a pop-up window so it lands exactly at `bounds`.
 pub fn popup_bounds(bounds: Bounds<gpui_kit::Pixels>) -> Bounds<gpui_kit::Pixels> {
     #[cfg(target_os = "linux")]
-    let bounds = Bounds::new(
-        point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
-        bounds.size,
-    );
+    if !snapwright_capture::wayland_session() {
+        return Bounds::new(
+            point(bounds.origin.x - px(X11_SHIFT), bounds.origin.y),
+            bounds.size,
+        );
+    }
     bounds
+}
+
+/// Where a pop-up goes on Wayland, which places surfaces itself.
+#[derive(Debug, Clone, Copy)]
+pub enum Placement {
+    /// The whole display (the overlay).
+    Fill,
+    Centered,
+    /// The bottom-right corner, this far from the edges.
+    BottomRight(f32),
+}
+
+/// The window kind for a pop-up: a plain pop-up (override-redirect on X11), or on Wayland a
+/// layer-shell surface above everything, since a normal Wayland window is tiled or placed by
+/// the compositor. `keyboard` gives the surface the keyboard while it is up.
+pub fn popup_kind(placement: Placement, keyboard: bool) -> WindowKind {
+    #[cfg(target_os = "linux")]
+    if snapwright_capture::wayland_session() {
+        use gpui_kit::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
+        let (anchor, margin) = match placement {
+            Placement::Fill => (
+                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                None,
+            ),
+            Placement::Centered => (Anchor::empty(), None),
+            Placement::BottomRight(m) => (
+                Anchor::BOTTOM | Anchor::RIGHT,
+                Some((px(0.), px(m), px(m), px(0.))),
+            ),
+        };
+        return WindowKind::LayerShell(LayerShellOptions {
+            namespace: "snapwright".into(),
+            layer: Layer::Overlay,
+            anchor,
+            // -1: draw over panels and bars instead of beside them.
+            exclusive_zone: matches!(placement, Placement::Fill).then(|| px(-1.)),
+            margin,
+            keyboard_interactivity: if keyboard {
+                KeyboardInteractivity::Exclusive
+            } else {
+                KeyboardInteractivity::None
+            },
+            ..Default::default()
+        });
+    }
+    let _ = (placement, keyboard);
+    WindowKind::PopUp
+}
+
+/// GPUI's display for a capture display. Wayland outputs are matched by connector name
+/// (GPUI's display UUID is derived from it); elsewhere by origin.
+fn gpui_display(
+    display: &Display,
+    wanted: Bounds<gpui_kit::Pixels>,
+    screens: &[std::rc::Rc<dyn gpui_kit::PlatformDisplay>],
+) -> Option<std::rc::Rc<dyn gpui_kit::PlatformDisplay>> {
+    #[cfg(target_os = "linux")]
+    if snapwright_capture::wayland_session() {
+        let uuid = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, display.name.as_bytes());
+        return screens
+            .iter()
+            .find(|d| d.uuid().is_ok_and(|u| u == uuid))
+            .cloned();
+    }
+    let _ = display;
+    screens
+        .iter()
+        .find(|d| {
+            let o = d.bounds().origin;
+            (o.x - wanted.origin.x).abs() < px(2.) && (o.y - wanted.origin.y).abs() < px(2.)
+        })
+        .cloned()
 }
 
 /// Connects to the platform capture API once, at startup.
@@ -102,7 +176,8 @@ fn warm_up(cx: &mut App) {
         titlebar: None,
         focus: false,
         show: false,
-        kind: WindowKind::PopUp,
+        kind: popup_kind(Placement::Centered, false),
+        window_background: WindowBackgroundAppearance::Transparent,
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
@@ -236,12 +311,13 @@ fn open_overlays(
             point(px(b.x as f32 / s), px(b.y as f32 / s)),
             size(px(b.width as f32 / s), px(b.height as f32 / s)),
         );
-        // Prefer GPUI's own idea of the display, so the window lands exactly on it.
-        let screen = screens.iter().find(|d| {
-            let o = d.bounds().origin;
-            (o.x - wanted.origin.x).abs() < px(2.) && (o.y - wanted.origin.y).abs() < px(2.)
-        });
-        let bounds = screen.map(|d| d.bounds()).unwrap_or(wanted);
+        // Prefer GPUI's own idea of the display, so the window lands exactly on it. Wayland
+        // anchors the overlay to the output's edges, so only the output matters there.
+        let screen = gpui_display(&display, wanted, &screens);
+        let bounds = match &screen {
+            Some(d) if !snapwright_capture::wayland_session() => d.bounds(),
+            _ => wanted,
+        };
         let bounds = popup_bounds(bounds);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -249,7 +325,7 @@ fn open_overlays(
             titlebar: None,
             focus: true,
             show: true,
-            kind: WindowKind::PopUp,
+            kind: popup_kind(Placement::Fill, true),
             is_movable: false,
             is_resizable: false,
             is_minimizable: false,
@@ -472,7 +548,7 @@ fn keep(frame: Frame, meta: Metadata, pressed_at: Instant, cx: &mut App) {
         cx.update(|cx| {
             crate::library_view::notify_changed(cx);
             if let Some((id, thumb)) = stored {
-                crate::toast::show(id, thumb, cx);
+                crate::toast::show(id, thumb, (width, height), cx);
             }
         });
     })

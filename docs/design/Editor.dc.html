@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>@font-face{font-family:"Geist";src:url("fonts/Geist.ttf") format("truetype");font-weight:100 900}body{margin:0;font-family:"Geist",system-ui,sans-serif}a{color:var(--accent,#2f6fd6)}a:hover{color:var(--fg,#18181d)}</style>
+</helmet>
+<div data-screen-label="Editor" style="width:1200px;height:720px;display:flex;flex-direction:column;background:var(--bg);color:var(--fg);font-family:Geist,system-ui,sans-serif;font-size:13px;overflow:hidden;border-radius:12px;border:1px solid var(--line2);box-shadow:var(--shadow);box-sizing:border-box">
+  <header style="height:52px;flex-shrink:0;display:flex;align-items:center;gap:12px;padding:0 12px 0 16px;border-bottom:1px solid var(--line)">
+    <div style="display:flex;align-items:baseline;gap:8px;min-width:0;flex:1">
+      <div style="font-weight:600;font-size:14px;letter-spacing:-0.01em;white-space:nowrap">Weekly metrics</div>
+      <div style="color:var(--fg3);white-space:nowrap">Chromium-browser</div>
+      <div style="align-self:center;height:20px;display:flex;align-items:center;gap:5px;padding:0 8px;border-radius:10px;background:var(--hover);color:var(--fg2);font-size:11.5px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:#e5a10a"></span>Unsaved</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:2px">
+      <div title="Undo ⌘Z" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--fg2)"><span style="width:16px;height:16px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/undo-2.svg) center/contain no-repeat"></span></div>
+      <div title="Redo ⇧⌘Z" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--fg3);opacity:.45"><span style="width:16px;height:16px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/redo-2.svg) center/contain no-repeat"></span></div>
+    </div>
+    <div style="width:1px;height:20px;background:var(--line)"></div>
+    <div style="height:32px;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:0 12px;border-radius:8px;border:1px solid var(--line2);font-weight:500">
+      <span style="width:15px;height:15px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/copy.svg) center/contain no-repeat"></span>Copy
+    </div>
+    <div style="height:32px;display:flex;align-items:center;gap:7px;padding:0 14px;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-weight:500">
+      <span style="width:15px;height:15px;background:currentColor;mask:url(https://unpkg.com/lucide-static@0.460.0/icons/check.svg) center/contain no-repeat"></span>Done
+    </div>
+  </header>
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:56px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:2px;border-right:1px solid var(--line);background:var(--panel)">
+      <sc-for list="{{ tools }}" as="t" hint-placeholder-count="11">
+        <sc-if value="{{ t.sep }}" hint-placeholder-val="{{ false }}"><div style="width:24px;height:1px;background:var(--line2);margin:6px 0"></div></sc-if>
+        <div title="{{ t.name }} ({{ t.key }})" style="position:relative;width:38px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:{{ t.bg }};color:{{ t.fg }}">
+          <span style="width:17px;height:17px;background:currentColor;mask:url({{ t.icon }}) center/contain no-repeat"></span>
+          <span style="position:absolute;right:3px;bottom:2px;font-size:8.5px;font-weight:600;color:var(--fg3);opacity:{{ t.keyOp }}">{{ t.key }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="flex:1;position:relative;background:var(--canvas);display:flex;align-items:center;justify-content:center;min-width:0">
+      <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);height:40px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 6px 0 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.08)">
+        <div style="font-size:12px;font-weight:500;color:var(--fg2)">Text</div>
+        <div style="width:1px;height:18px;background:var(--line)"></div>
+        <div style="display:flex;gap:4px">
+          <sc-for list="{{ colors }}" as="c" hint-placeholder-count="7">
+            <div title="{{ c.n }}" style="width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:{{ c.ring }}"><div style="width:16px;height:16px;border-radius:50%;background:{{ c.hex }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.14)"></div></div>
+          </sc-for>
+        </div>
+        <div style="width:1px;height:18px;background:var(--line)"></div>
+        <div style="display:flex;gap:2px;padding:2px;border-radius:7px;background:var(--hover)">
+          <div style="width:30px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:5px;color:var(--fg2);font-size:11px;font-weight:500">S</div>
+          <div style="width:30px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:5px;background:var(--bg);box-shadow:0 1px 2px rgba(0,0,0,.12);font-size:13px;font-weight:600">M</div>
+          <div style="width:30px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:5px;color:var(--fg2);font-size:15px;font-weight:500">L</div>
+        </div>
+      </div>
+      <img src="captures/weekly.png" style="width:1032px;max-width:calc(100% - 64px);display:block;border-radius:4px;box-shadow:0 0 0 1px rgba(0,0,0,.06),0 8px 30px rgba(0,0,0,.16)">
+    </div>
+  </div>
+  <footer style="height:30px;flex-shrink:0;display:flex;align-items:center;gap:16px;padding:0 16px;border-top:1px solid var(--line);font-size:12px;color:var(--fg2)">
+    <div style="flex:1;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden">Click to type
+      <span style="color:var(--fg3)">·</span><span style="height:18px;padding:0 5px;border-radius:4px;border:1px solid var(--line2);display:flex;align-items:center;font-size:10.5px">↵</span>finish
+      <span style="color:var(--fg3)">·</span><span style="height:18px;padding:0 5px;border-radius:4px;border:1px solid var(--line2);display:flex;align-items:center;font-size:10.5px">⇧↵</span>new line
+    </div>
+    <div style="font-variant-numeric:tabular-nums;color:var(--fg3)">1032 × 396 px</div>
+    <div style="font-variant-numeric:tabular-nums;color:var(--fg3)">100%</div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:720}}">
+class Component extends DCLogic {
+  renderVals() {
+    const L = 'https://unpkg.com/lucide-static@0.460.0/icons/';
+    const defs = [
+      ['Select','V','mouse-pointer-2'],
+      ['Arrow','A','move-up-right',1],['Line','L','slash'],['Rectangle','R','square'],['Ellipse','E','circle'],
+      ['Text','T','type',1],['Step','N','circle-dot'],['Highlight','H','highlighter'],
+      ['Blur','B','droplets',1],['Pixelate','P','grid-3x3'],
+      ['Crop','C','crop',1],
+    ];
+    const tools = defs.map(([name, key, ic, sep]) => {
+      const on = name === 'Text';
+      return { name, key, sep: !!sep, icon: L + ic + '.svg', bg: on ? 'var(--accent-soft)' : 'transparent', fg: on ? 'var(--accent)' : 'var(--fg2)', keyOp: on ? 1 : 0.7 };
+    });
+    const colors = [['Red','#E5484D'],['Orange','#F76B15'],['Yellow','#FFD60A'],['Green','#30A46C'],['Blue','#0090FF'],['Black','#111111'],['White','#FFFFFF']]
+      .map(([n, hex], i) => ({ n, hex, ring: i === 0 ? '0 0 0 2px var(--fg)' : 'none' }));
+    return { tools, colors };
+  }
+}
+</script>
+</body>
+</html>

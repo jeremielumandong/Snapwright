@@ -5,7 +5,8 @@
 //! * macOS 14+: ScreenCaptureKit (`SCScreenshotManager`).
 //! * Windows 10+: DXGI Desktop Duplication.
 //! * Linux X11: MIT-SHM `GetImage`, falling back to a plain `GetImage`.
-//! * Linux Wayland: not yet ([`CaptureError::Unsupported`]); see `PLAN.md` Phase 2.
+//! * Linux Wayland: `wlr-screencopy` (wlroots compositors such as Hyprland and Sway). GNOME
+//!   and KDE need the portal backend ([`CaptureError::Unsupported`] until then).
 //!
 //! Every backend returns [`Frame`]s in BGRA, the layout macOS and Windows capture in and the
 //! one GPUI's `RenderImage` takes, so a frame reaches the overlay without a conversion.
@@ -13,14 +14,19 @@
 mod frame;
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)]
 mod linux;
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod macos;
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+mod wayland;
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 mod windows;
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+mod x11;
 
 pub use frame::{Frame, Rect};
 
@@ -35,6 +41,14 @@ pub const EXCLUDES_OWN_WINDOWS: bool = cfg!(target_os = "macos");
 #[cfg(target_os = "windows")]
 pub fn exclude_window(hwnd: isize) -> bool {
     windows::exclude_window(hwnd)
+}
+
+/// Whether this is a Wayland session, where capture goes through the Wayland backend and
+/// pop-ups must be layer-shell surfaces. Always false off Linux.
+pub fn wayland_session() -> bool {
+    cfg!(target_os = "linux")
+        && (std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t == "wayland")
+            || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty()))
 }
 
 /// The frontmost window containing `(x, y)` (physical pixels), from a front-to-back list.

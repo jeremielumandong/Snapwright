@@ -7,19 +7,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui_kit::{
-    ClipboardItem, Context, CursorStyle, Div, FocusHandle, Hsla, ImageSource,
+    ClipboardItem, Context, CursorStyle, Div, FocusHandle, FontWeight, Hsla, ImageSource,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render, RenderImage, Rgba,
-    SharedString, Size, Styled as _, Window, div, hsla, img, px, size,
+    Size, Styled as _, Window, div, hsla, img, px, size,
 };
 use snapwright_capture::{Frame, Rect};
 
 use crate::selection::{Arrow, Outcome, Selector};
 use crate::session::{self, SnapTarget};
+use crate::theme::{self, hud};
 
 /// Loupe grid: cells per side (odd, so one sits under the pointer) and their size.
 const LOUPE_CELLS: i32 = 11;
-const LOUPE_CELL: f32 = 9.0;
+const LOUPE_CELL: f32 = 12.0;
+/// Height of the size label above the selection.
+const LABEL_H: f32 = 24.;
+/// Height of the key hint bar and its distance from the display edge.
+const HINTS_H: f32 = 40.;
+const HINTS_MARGIN: f32 = 24.;
 
 pub struct Overlay {
     display_id: u64,
@@ -186,38 +192,64 @@ impl Overlay {
     fn loupe(&self, at: (i32, i32), pointer: Point<Pixels>) -> Div {
         let half = LOUPE_CELLS / 2;
         let side = LOUPE_CELLS as f32 * LOUPE_CELL;
-        let mut grid = div().flex().flex_col();
+        let mut grid = div()
+            .relative()
+            .flex()
+            .flex_col()
+            .rounded(px(6.))
+            .overflow_hidden();
         for dy in -half..=half {
             let mut row = div().flex().flex_row();
             for dx in -half..=half {
-                let colour = self.pixel(at.0 + dx, at.1 + dy).map_or(
-                    hsla(0., 0., 0., 1.),
-                    |[b, g, r, _]| {
-                        Rgba {
-                            r: f32::from(r) / 255.0,
-                            g: f32::from(g) / 255.0,
-                            b: f32::from(b) / 255.0,
-                            a: 1.0,
-                        }
-                        .into()
-                    },
-                );
-                let mut cell = div().w(px(LOUPE_CELL)).h(px(LOUPE_CELL)).bg(colour);
-                if dx == 0 && dy == 0 {
-                    cell = cell.border_1().border_color(hsla(0., 0., 1., 0.9));
-                }
-                row = row.child(cell);
+                let colour = self
+                    .pixel(at.0 + dx, at.1 + dy)
+                    .map_or(hsla(0., 0., 0., 1.), colour);
+                row = row.child(div().w(px(LOUPE_CELL)).h(px(LOUPE_CELL)).bg(colour));
             }
             grid = grid.child(row);
         }
-        let label: SharedString = match self.pixel(at.0, at.1) {
-            Some(p) => format!("{}  {}, {}", hex(p), at.0, at.1),
-            None => format!("{}, {}", at.0, at.1),
+        let centre = half as f32 * LOUPE_CELL;
+        grid = grid.child(
+            div()
+                .absolute()
+                .left(px(centre - 1.))
+                .top(px(centre - 1.))
+                .size(px(LOUPE_CELL + 2.))
+                .border_1()
+                .border_color(hsla(0., 0., 0., 0.5))
+                .child(div().size_full().border(px(1.5)).border_color(hud::fg())),
+        );
+        let here = self.pixel(at.0, at.1);
+        let mut label = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(3.))
+            .pb(px(2.))
+            .text_size(px(11.))
+            .text_color(hud::fg());
+        if let Some(p) = here {
+            label = label
+                .child(
+                    div()
+                        .size(px(10.))
+                        .rounded(px(3.))
+                        .border_1()
+                        .border_color(hsla(0., 0., 1., 0.3))
+                        .bg(colour(p)),
+                )
+                .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(hex(p)));
+        } else {
+            label = label.child(div().flex_1());
         }
-        .into();
+        label = label.child(
+            div()
+                .text_color(hud::fg3())
+                .child(format!("{}, {}", at.0, at.1)),
+        );
         let gap = px(18.);
-        let width = px(side + 8.);
-        let height = px(side + 30.);
+        let width = px(side + 10.);
+        let height = px(side + 33.);
         let x = if pointer.x + gap + width > self.viewport.width {
             pointer.x - gap - width
         } else {
@@ -232,22 +264,116 @@ impl Overlay {
             .absolute()
             .left(x)
             .top(y)
-            .p(px(4.))
-            .rounded(px(6.))
-            .bg(hsla(0., 0., 0.08, 0.92))
+            .w(width)
+            .p(px(5.))
+            .rounded(px(10.))
+            .bg(hud::bg())
             .border_1()
-            .border_color(hsla(0., 0., 1., 0.25))
+            .border_color(hud::border())
+            .shadow(vec![shadow()])
             .flex()
             .flex_col()
-            .gap(px(4.))
+            .gap(px(6.))
             .child(grid)
+            .child(label)
+    }
+
+    /// The selection's size, as a pill above it (below it at the top of the display).
+    fn size_label(&self, region: Rect, x0: Pixels, y0: Pixels, y1: Pixels) -> Div {
+        let vh = self.viewport.height;
+        let y = if y0 > px(LABEL_H + 10.) {
+            y0 - px(LABEL_H + 8.)
+        } else {
+            y1 + px(8.)
+        };
+        let y = y.min(vh - px(LABEL_H + 2.)).max(px(2.));
+        div()
+            .absolute()
+            .left(x0.max(px(2.)))
+            .top(y)
+            .h(px(LABEL_H))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(8.))
+            .rounded(px(6.))
+            .bg(hsla(240. / 360., 0.09, 0.1, 0.92))
+            .border_1()
+            .border_color(hud::border())
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(hud::fg())
+            .child(region.width.to_string())
+            .child(div().text_color(hud::fg3()).child("×"))
             .child(
-                div()
-                    .text_color(hsla(0., 0., 1., 1.))
-                    .text_size(px(11.))
-                    .child(label),
+                div().flex().child(region.height.to_string()).child(
+                    div()
+                        .text_color(hud::fg3())
+                        .font_weight(FontWeight::NORMAL)
+                        .child("px"),
+                ),
             )
     }
+
+    /// Keys for the current step, centred at the bottom of the display (at the top when a
+    /// selection reaches down there).
+    fn hints(&self, y1: Pixels) -> Div {
+        let bar = div()
+            .h(px(HINTS_H))
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .px(px(14.))
+            .rounded(px(12.))
+            .bg(hud::bg())
+            .border_1()
+            .border_color(hud::border())
+            .shadow(vec![shadow()])
+            .text_size(px(12.))
+            .text_color(hud::fg2());
+        let bar = if self.selector.is_adjusting() {
+            bar.child(theme::hud_hint(&["left", "right"], "Move"))
+                .child(theme::hud_hint(&["shift", "left"], "Resize"))
+                .child(theme::hud_hint(&["enter"], "Copy"))
+                .child(theme::hud_hint(&["escape"], "Cancel"))
+        } else {
+            bar.child("Click a window or drag a region")
+                .child(theme::hud_hint(&["shift"], "Adjust"))
+                .child(theme::hud_hint(&["C"], "Copy colour"))
+                .child(theme::hud_hint(&["escape"], "Cancel"))
+        };
+        let row = div().absolute().left_0().w_full().flex().justify_center();
+        // Out of the way of a selection that reaches the bottom; a hovered window or display
+        // is not a selection yet.
+        let low = y1 > self.viewport.height - px(HINTS_H + HINTS_MARGIN * 2.);
+        let top = if low && !self.selector.is_hovering() {
+            px(HINTS_MARGIN)
+        } else {
+            self.viewport.height - px(HINTS_H + HINTS_MARGIN)
+        };
+        row.top(top).child(bar)
+    }
+}
+
+fn shadow() -> gpui_kit::BoxShadow {
+    gpui_kit::BoxShadow {
+        color: hud::shadow(),
+        offset: gpui_kit::point(px(0.), px(10.)),
+        blur_radius: px(30.),
+        spread_radius: px(0.),
+        inset: false,
+    }
+}
+
+/// A BGRA pixel as a GPUI colour.
+fn colour([b, g, r, _]: [u8; 4]) -> Hsla {
+    Rgba {
+        r: f32::from(r) / 255.0,
+        g: f32::from(g) / 255.0,
+        b: f32::from(b) / 255.0,
+        a: 1.0,
+    }
+    .into()
 }
 
 /// `#RRGGBB` for a BGRA pixel.
@@ -256,7 +382,7 @@ fn hex([b, g, r, _]: [u8; 4]) -> String {
 }
 
 fn shade() -> Hsla {
-    hsla(0., 0., 0., 0.45)
+    hud::shade()
 }
 
 impl Render for Overlay {
@@ -302,32 +428,11 @@ impl Render for Overlay {
         let band = |x: Pixels, y: Pixels, w: Pixels, h: Pixels| {
             div().absolute().left(x).top(y).w(w).h(h).bg(shade())
         };
-        let (border, label) = if self.selector.is_hovering() {
-            (
-                hsla(0.58, 0.9, 0.6, 1.),
-                format!("{} × {}", region.width, region.height),
-            )
-        } else if self.selector.is_adjusting() {
-            (
-                hsla(0., 0., 1., 0.95),
-                format!(
-                    "{} × {}   arrows move · Shift+arrows resize · Enter copies",
-                    region.width, region.height
-                ),
-            )
+        let border = if self.selector.is_hovering() {
+            hud::accent()
         } else {
-            (
-                hsla(0., 0., 1., 0.95),
-                format!("{} × {}", region.width, region.height),
-            )
+            hud::fg()
         };
-        let label: SharedString = label.into();
-        let label_y = if y0 > px(28.) {
-            y0 - px(26.)
-        } else {
-            y1 + px(6.)
-        };
-        let label_y = label_y.min(vh - px(24.)).max(px(2.));
         // Hovering the bare desktop targets the whole display; dim it all so the frozen frame
         // never passes for the live screen.
         if self.selector.is_hovering() && region == Rect::new(0, 0, self.width, self.height) {
@@ -338,29 +443,20 @@ impl Render for Overlay {
             .child(band(px(0.), y1, vw, vh - y1))
             .child(band(px(0.), y0, x0, h))
             .child(band(x1, y0, vw - x1, h))
+            // A dark hairline outside the white edge keeps it visible on light content.
             .child(
                 div()
                     .absolute()
-                    .left(x0)
-                    .top(y0)
-                    .w(w)
-                    .h(h)
-                    .border_2()
-                    .border_color(border),
+                    .left(x0 - px(1.))
+                    .top(y0 - px(1.))
+                    .w(w + px(2.))
+                    .h(h + px(2.))
+                    .border_1()
+                    .border_color(hsla(0., 0., 0., 0.35))
+                    .child(div().size_full().border(px(1.5)).border_color(border)),
             )
-            .child(
-                div()
-                    .absolute()
-                    .left(x0.max(px(2.)))
-                    .top(label_y)
-                    .px(px(6.))
-                    .py(px(2.))
-                    .rounded(px(4.))
-                    .bg(hsla(0., 0., 0., 0.75))
-                    .text_color(hsla(0., 0., 1., 1.))
-                    .text_size(px(12.))
-                    .child(label),
-            );
+            .child(self.size_label(region, x0, y0, y1))
+            .child(self.hints(y1));
         if let Some(at) = self.selector.cursor()
             && window.is_window_hovered()
         {
