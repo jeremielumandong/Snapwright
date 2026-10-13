@@ -8,6 +8,7 @@
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ocrs::{ImageSource, OcrEngine, OcrEngineParams, TextItem as _};
 use rten_imageproc::{Point, RotatedRect};
@@ -204,9 +205,20 @@ fn fetch(dir: &Path, path: &Path, model: &ModelFile) -> Result<Vec<u8>> {
         return Err(err("downloaded file does not match the pinned hash".into()));
     }
     std::fs::create_dir_all(dir).map_err(|e| err(format!("{}: {e}", dir.display())))?;
-    let partial = path.with_extension("part");
+    // A partial name of its own, so two recognizers fetching at once (parallel tests, two
+    // windows) never rename each other's file away.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let partial = dir.join(format!(
+        "{}.{}-{}.part",
+        model.name,
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::write(&partial, &body)
         .and_then(|()| std::fs::rename(&partial, path))
-        .map_err(|e| err(format!("{}: {e}", path.display())))?;
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&partial);
+            err(format!("{}: {e}", path.display()))
+        })?;
     Ok(body)
 }

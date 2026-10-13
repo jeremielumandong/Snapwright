@@ -130,3 +130,6 @@ site/                           marketing site (static HTML, deployed by .github
   starts `toast::SETTLE` after the overlays close so they are not in the first frame.
 - Xvfb has no window manager: keyboard focus follows the pointer, which is fine for the
   full-screen overlay. `tracing` macros shadow a local named `display`.
+- OCR models on Linux: cargo runs the `recognize` tests in parallel and each fetches the
+  models into the same folder, so every fetch writes its own `.part` file before renaming
+  (a shared one was renamed away under the other test: "No such file" in CI).
