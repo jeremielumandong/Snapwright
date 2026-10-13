@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- The made-up dashboard the site's sample captures are taken from (scripts/site-shots.sh). -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1260px; height: 660px; display: flex; font: 15px/1.4 "DejaVu Sans", sans-serif; color: #1c2333; background: #f5f6f9; }
+  aside { width: 200px; background: #1d2333; color: #c9cfdc; padding: 18px 14px; }
+  aside b { display: block; color: #fff; font-size: 17px; margin: 0 0 22px; }
+  aside a { display: block; padding: 9px 10px; border-radius: 6px; margin-bottom: 2px; }
+  aside a.on { background: #2e3750; color: #fff; }
+  main { flex: 1; padding: 22px 28px; }
+  h1 { margin: 0; font-size: 23px; }
+  .sub { color: #6b7385; margin: 4px 0 20px; }
+  .row { display: flex; gap: 16px; margin-bottom: 16px; }
+  .card { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(20, 30, 60, .06); flex: 1; }
+  .k { font-size: 12px; letter-spacing: .06em; color: #6b7385; text-transform: uppercase; }
+  .v { font-size: 30px; font-weight: bold; margin: 6px 0 2px; }
+  .up { color: #16a06a; font-size: 13px; } .bad { color: #e0434b; font-size: 13px; }
+  .bars { display: flex; align-items: flex-end; gap: 10px; height: 170px; margin-top: 14px; }
+  .bars i { flex: 1; background: linear-gradient(#5b8def, #3d67da); border-radius: 3px 3px 0 0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th { text-align: left; font-weight: normal; color: #6b7385; font-size: 13px; padding: 6px; }
+  td { padding: 8px 6px; border-top: 1px solid #e8eaf0; }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 9px; }
+  .red { background: #fde4e5; color: #c8323a; } .amber { background: #fdf0d8; color: #a26a07; } .green { background: #dff5ea; color: #188458; }
+</style>
+</head>
+<body>
+<aside>
+  <b>◆ Northwind</b>
+  <a class="on">Overview</a><a>Releases</a><a>Incidents</a><a>Customers</a><a>Settings</a>
+</aside>
+<main>
+  <h1>Weekly metrics</h1>
+  <div class="sub">Week 41 · all regions</div>
+  <div class="row">
+    <div class="card"><div class="k">Active users</div><div class="v">48,210</div><div class="up">▲ 6.4% vs last week</div></div>
+    <div class="card"><div class="k">Crash-free sessions</div><div class="v">99.62%</div><div class="up">▲ 0.21 pts</div></div>
+    <div class="card"><div class="k">P95 latency</div><div class="v">182 ms</div><div class="bad">▲ 14 ms</div></div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex: 1.35">
+      <div class="k">Sign-ups per day</div>
+      <div class="bars"><i style="height:42%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:67%"></i><i style="height:72%"></i><i style="height:60%"></i><i style="height:82%"></i><i style="height:77%"></i><i style="height:93%"></i><i style="height:89%"></i></div>
+    </div>
+    <div class="card">
+      <div class="k">Open incidents</div>
+      <table>
+        <tr><th>Service</th><th>Status</th></tr>
+        <tr><td>Checkout API</td><td><span class="tag red">Degraded</span></td></tr>
+        <tr><td>Search</td><td><span class="tag amber">Investigating</span></td></tr>
+        <tr><td>Auth</td><td><span class="tag green">Resolved</span></td></tr>
+        <tr><td>Billing</td><td><span class="tag green">Resolved</span></td></tr>
+      </table>
+    </div>
+  </div>
+</main>
+</body>
+</html>
