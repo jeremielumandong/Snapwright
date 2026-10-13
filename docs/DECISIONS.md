@@ -273,3 +273,21 @@ Jeremie asked for auto-update like Switchyard's. `crates/app/src/update.rs` is S
 - The app is resident, so release builds check 30 s after launch and then once a day, not
   only at startup. `SNAPWRIGHT_NO_UPDATE_CHECK` turns the automatic checks off. Restarting
   waits while a recording runs.
+
+## 2026-10-13: Hyprland shortcuts and following the Omarchy theme
+
+- Wayland has no global key grabs, so Ctrl+Shift+2 did nothing on Hyprland (Omarchy) unless
+  the user bound `--capture-now` themselves. On Hyprland the app now adds the binds over the
+  IPC socket (`keyword bind CTRL SHIFT, 2, exec, '<exe>' --capture-now`, and the repeat and
+  record keys). Hyprland drops runtime binds when it reloads its config (every Omarchy theme
+  switch), so a thread on the event socket re-adds them on `configreloaded`. A key the user
+  already bound to something else is left alone; an older Snapwright bind (moved AppImage) is
+  replaced. The binds outlive the app, so a press after Quit launches it and captures. The
+  GlobalShortcuts portal was the alternative, but Hyprland's portal still needs a `global`
+  bind in the user's config, so it would not have made the key work on its own.
+- Theme: the tray has Theme > Match system / Light / Dark / Follow Omarchy, saved in
+  `settings.toml` in the config folder. The Omarchy reader comes from Switchyard (same author,
+  Apache-2.0) and maps the theme's background, foreground, accent and terminal colors onto the
+  window palette; HUDs stay dark. With no saved choice, Omarchy machines start on Follow
+  Omarchy. Nothing polls (idle CPU stays 0%): the theme is re-read on a Hyprland config reload
+  and when a library or editor window comes to the front.

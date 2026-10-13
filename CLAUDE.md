@@ -89,8 +89,11 @@ site/                           marketing site (static HTML, deployed by .github
 - Wayland: capture is `wlr-screencopy` (wlroots compositors only; GNOME/KDE wait for the
   portal backend). `snapwright_capture::wayland_session()` picks the backend and makes
   pop-ups layer-shell surfaces (`session::popup_kind`). No global hotkeys there: the app is
-  single-instance (`instance.rs`) and users bind `snapwright-app --capture-now` in the
+  single-instance (`instance.rs`); on Hyprland it binds its keys over IPC (`hyprland.rs`,
+  re-bound on every config reload), elsewhere users bind `snapwright-app --capture-now` in the
   compositor. Screencopy waits for a repaint, so it times out while the display sleeps.
+- Theme choice (tray > Theme) lives in `settings.toml` in the config folder; "Follow Omarchy"
+  reads `~/.local/state/omarchy/current/theme` (Omarchy 4) or `~/.config/omarchy/current/theme`.
 - Running the Xvfb scripts from a Wayland desktop needs `env -u WAYLAND_DISPLAY
   XDG_SESSION_TYPE=x11`, or the app and tests pick the Wayland backend.
 - GPUI: `window.remove_window()` through a window's own handle fails while that window is
