@@ -26,7 +26,7 @@
   </nav>
   <div class="header-end">
     <button type="button" class="theme-btn" data-theme-toggle aria-expanded="false"><span class="theme-dot" aria-hidden="true"></span>Theme</button>
-    <a class="gh" href="https://github.com/jeremielumandong/Snapwright">GitHub ↗</a>
+    <a class="gh" href="https://github.com/jeremielumandong/snapwright">GitHub ↗</a>
     <a class="pill" href="#download">Download<span data-os-short>macOS</span></a>
   </div>
 </div></header>
@@ -44,8 +44,8 @@
   <div class="lede-row">
     <p class="lede">Press one key and the overlay is already there. Drag, let go, and the shot is on your clipboard, saved to disk, and filed in a library you can actually search.</p>
     <div class="cta">
-      <a class="big-btn" data-dl-href href="https://github.com/jeremielumandong/Snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
-      <div class="install-cmd" data-linux-cmd hidden><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/Snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
+      <a class="big-btn" data-dl-href href="https://github.com/jeremielumandong/snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
+      <div class="install-cmd" data-linux-cmd hidden><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
       <span class="cta-sub"><span data-dl-sub>Universal DMG · Apple silicon &amp; Intel</span> · <a href="#download">other platforms</a></span>
     </div>
   </div>
@@ -172,9 +172,9 @@
   <div class="lede-row">
     <p class="lede">One Rust codebase using each system's fastest capture path. No Electron, no web view. Builds are published on GitHub as soon as they're cut.</p>
     <div class="cta">
-      <a class="big-btn" data-dl-href href="https://github.com/jeremielumandong/Snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
-      <div class="install-cmd" data-linux-cmd hidden><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/Snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
-      <span class="cta-sub"><span data-dl-sub>Universal DMG · Apple silicon &amp; Intel</span> · <a href="https://github.com/jeremielumandong/Snapwright/releases/latest">release notes</a></span>
+      <a class="big-btn" data-dl-href href="https://github.com/jeremielumandong/snapwright/releases/latest"><span data-dl-label>Download for macOS</span><span aria-hidden="true">↓</span></a>
+      <div class="install-cmd" data-linux-cmd hidden><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
+      <span class="cta-sub"><span data-dl-sub>Universal DMG · Apple silicon &amp; Intel</span> · <a href="https://github.com/jeremielumandong/snapwright/releases/latest">release notes</a></span>
     </div>
   </div>
   <div class="platforms">
@@ -182,20 +182,20 @@
       <span class="name">macOS<span class="yours">YOUR SYSTEM</span></span>
       <span class="api">ScreenCaptureKit · Retina-aware</span>
       <span class="note">Apple silicon and Intel. Grant Screen Recording on first launch.</span>
-      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest/download/Snapwright-macos-universal.dmg">Universal DMG ↓</a>
+      <a href="https://github.com/jeremielumandong/snapwright/releases/latest/download/Snapwright-macos-universal.dmg">Universal DMG ↓</a>
     </div>
     <div class="platform" data-platform="windows">
       <span class="name">Windows<span class="yours">YOUR SYSTEM</span></span>
       <span class="api">DXGI Desktop Duplication · per-monitor DPI</span>
       <span class="note">Windows 10 and 11. Lives in your tray, starts in milliseconds.</span>
-      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest/download/Snapwright-windows-x64-setup.exe">Installer · x64 ↓</a>
+      <a href="https://github.com/jeremielumandong/snapwright/releases/latest/download/Snapwright-windows-x64-setup.exe">Installer · x64 ↓</a>
     </div>
     <div class="platform" data-platform="linux">
       <span class="name">Linux<span class="yours">YOUR SYSTEM</span></span>
       <span class="api">X11 shared memory · ~4 ms at 1440p</span>
       <span class="note">X11, and Wayland on wlroots compositors such as Sway and Hyprland. GNOME and KDE are next.</span>
-      <a href="https://github.com/jeremielumandong/Snapwright/releases/latest/download/Snapwright-linux-x86_64.AppImage">AppImage · x86_64 ↓</a>
-      <div class="install-cmd"><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/Snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
+      <a href="https://github.com/jeremielumandong/snapwright/releases/latest/download/Snapwright-linux-x86_64.AppImage">AppImage · x86_64 ↓</a>
+      <div class="install-cmd"><code>curl -fsSL https://raw.githubusercontent.com/jeremielumandong/snapwright/main/install.sh | sh</code><button type="button" data-copy>Copy</button></div>
     </div>
   </div>
   <div class="source">
@@ -203,7 +203,7 @@
       <h3>Build from source</h3>
       <p>You need Rust; the toolchain is pinned in the repo. On Linux, install the GPUI dependencies first: <code>libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev</code></p>
     </div>
-<pre><i>$ </i>git clone https://github.com/jeremielumandong/Snapwright.git
+<pre><i>$ </i>git clone https://github.com/jeremielumandong/snapwright.git
 <i>$ </i>cd Snapwright
 <i>$ </i>cargo run --release -p snapwright-app</pre>
   </div>
@@ -213,7 +213,7 @@
 <footer class="wrap site-footer">
   <div class="row">
     <span>Fast, organized screenshots for macOS, Windows and Linux.</span>
-    <nav><a href="#capture">Features</a><a href="#download">Download</a><a href="https://github.com/jeremielumandong/Snapwright/releases">Releases</a><a href="https://github.com/jeremielumandong/Snapwright">GitHub ↗</a></nav>
+    <nav><a href="#capture">Features</a><a href="#download">Download</a><a href="https://github.com/jeremielumandong/snapwright/releases">Releases</a><a href="https://github.com/jeremielumandong/snapwright">GitHub ↗</a></nav>
   </div>
   <div class="wordmark" aria-hidden="true">Snapwright</div>
 </footer>

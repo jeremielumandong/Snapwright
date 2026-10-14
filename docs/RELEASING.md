@@ -54,7 +54,7 @@ uploads it to the draft only when run with "Upload unsigned" ticked.
 
 There are no Windows secrets: the job signs in with GitHub OIDC. The Entra app needs a federated
 credential for this repository's environment, subject
-`repo:jeremielumandong/Snapwright:environment:windows-release` (the case matters), and the "Trusted Signing
+`repo:jeremielumandong/snapwright:environment:windows-release` (the case matters), and the "Trusted Signing
 Certificate Profile Signer" role on the certificate profile. The Windows job fails early, before
 compiling, if any variable is missing.
 

@@ -14,7 +14,7 @@
   ];
   // Stable names the release workflows upload next to the versioned files
   // (scripts/upload-release-assets.py), so these always fetch the newest build.
-  var LATEST = "https://github.com/jeremielumandong/Snapwright/releases/latest/download/";
+  var LATEST = "https://github.com/jeremielumandong/snapwright/releases/latest/download/";
   var PLAT = {
     mac: { short: "macOS", label: "Download for macOS", sub: "Universal DMG · Apple silicon & Intel", mod: "⌘", alt: "Option", file: "Snapwright-macos-universal.dmg" },
     windows: { short: "Windows", label: "Download for Windows", sub: "Installer · Windows 10 & 11 · x64", mod: "Ctrl", alt: "Alt", file: "Snapwright-windows-x64-setup.exe" },

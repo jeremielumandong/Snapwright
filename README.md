@@ -11,13 +11,13 @@ Status: early development (Phase 0).
 
 ## Install
 
-- **macOS:** [Snapwright-macos-universal.dmg](https://github.com/jeremielumandong/Snapwright/releases/latest/download/Snapwright-macos-universal.dmg)
+- **macOS:** [Snapwright-macos-universal.dmg](https://github.com/jeremielumandong/snapwright/releases/latest/download/Snapwright-macos-universal.dmg)
   (Apple silicon and Intel). Grant Screen Recording on first launch.
-- **Windows:** [Snapwright-windows-x64-setup.exe](https://github.com/jeremielumandong/Snapwright/releases/latest/download/Snapwright-windows-x64-setup.exe).
+- **Windows:** [Snapwright-windows-x64-setup.exe](https://github.com/jeremielumandong/snapwright/releases/latest/download/Snapwright-windows-x64-setup.exe).
 - **Linux (x86_64):**
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/jeremielumandong/Snapwright/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/jeremielumandong/snapwright/main/install.sh | sh
   ```
 
   [`install.sh`](install.sh) downloads the latest AppImage, verifies its SHA-256 checksum and
