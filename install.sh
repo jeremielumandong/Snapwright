@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install Snapwright on Linux (x86_64) for the current user: no sudo, no Rust toolchain.
 #
-#   curl -fsSL https://raw.githubusercontent.com/jeremielumandong/Snapwright/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/jeremielumandong/snapwright/main/install.sh | sh
 #
 # Downloads the published AppImage from GitHub Releases, verifies its SHA-256 checksum, and
 # installs:
@@ -29,7 +29,7 @@
 snapwright_install() (
     set -eu
 
-    repo=jeremielumandong/Snapwright
+    repo=jeremielumandong/snapwright
     releases="https://github.com/$repo/releases"
     asset=Snapwright-linux-x86_64.AppImage
 
