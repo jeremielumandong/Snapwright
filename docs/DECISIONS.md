@@ -334,3 +334,16 @@ From the "Omarchy theme implementation" design handoff.
   Alt or Super so typing never sets one off. Hyprland binds use key names (`2`), so on
   layouts without digits on the unshifted row the digit defaults need changing; binding by
   keycode is a follow-up.
+
+## 2026-10-14: AccessKit off on macOS (Touch Bar crash)
+
+- v0.2.4 aborted a few seconds after launch on a Touch Bar MacBook Pro (M1, macOS 26.3):
+  an uncaught `NSRangeException` from `-[_NSTouchBarFinderObservation invalidate]` removing
+  a key-value observer during a display-cycle flush. GPUI's AccessKit adapter
+  (`accesskit_macos::SubclassingAdapter`) subclasses each window's content view at runtime
+  and restores the class when the window goes, which leaves the Touch Bar's observers
+  unregistered (zed-industries/zed#64819; Zed's fix, #65186, attaches the plain adapter to
+  `GPUIView` instead). gpui-fast, up to d599978, still has the subclassing adapter.
+- The app now starts with `Application::new_inaccessible` on macOS, so the adapter is
+  never attached. GPUI windows lose VoiceOver support until gpui-fast picks up the upstream
+  fix; switch back to `gpui_kit::application()` then.

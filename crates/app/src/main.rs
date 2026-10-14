@@ -101,7 +101,7 @@ fn main() -> Result<()> {
         theme::Choice::System
     });
 
-    gpui_kit::application()
+    new_application()
         .with_assets(assets::AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
@@ -145,6 +145,21 @@ fn main() -> Result<()> {
     // "Restart to update" quit the app; start the new version or its installer now.
     updates::run_after_exit();
     Ok(())
+}
+
+/// The GPUI application. On macOS AccessKit is off: its adapter subclasses each window's
+/// content view at runtime and restores the class when the window goes, which breaks the
+/// Touch Bar's key-value observers, and AppKit then aborts the app on Touch Bar Macs
+/// (zed-industries/zed#64819, fixed upstream in #65186 but not yet in gpui-fast).
+fn new_application() -> gpui_kit::Application {
+    #[cfg(target_os = "macos")]
+    {
+        gpui_kit::Application::new_inaccessible(gpui_kit::platform::current_platform(false))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        gpui_kit::application()
+    }
 }
 
 /// A press of `action`'s shortcut (a global hotkey, or a Hyprland bind's launch).
