@@ -73,13 +73,42 @@ pub fn recordings_dir() -> Result<PathBuf> {
 
 /// A new file name for a recording in the recordings folder (created if needed).
 pub fn recording_path(extension: &str) -> Result<PathBuf> {
-    let dir = recordings_dir()?;
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let dir = writable(recordings_dir()?, "Recordings")?;
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
     Ok(dir.join(format!("Snapwright {ms}.{extension}")))
+}
+
+/// `preferred`, created if needed, when files can be written there; otherwise `fallback` in
+/// the app's local data folder. Windows' Controlled Folder Access keeps unknown apps out of
+/// Pictures and Videos, and refuses even to create a folder there.
+fn writable(preferred: PathBuf, fallback: &str) -> Result<PathBuf> {
+    match probe(&preferred) {
+        Ok(()) => Ok(preferred),
+        Err(e) => {
+            let dirs = directories::ProjectDirs::from("", "", "Snapwright")
+                .context("no home directory")?;
+            let dir = dirs.data_local_dir().join(fallback);
+            tracing::warn!(
+                folder = %preferred.display(),
+                error = %e,
+                fallback = %dir.display(),
+                "cannot write to the folder; saving to the fallback"
+            );
+            std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+            Ok(dir)
+        }
+    }
+}
+
+/// Creates `dir` and writes (then removes) an empty file in it.
+fn probe(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let test = dir.join(format!(".snapwright-{}", std::process::id()));
+    std::fs::write(&test, [])?;
+    std::fs::remove_file(&test)
 }
 
 /// Where the capture library lives: the platform's data folder for Snapwright.
@@ -90,8 +119,7 @@ pub fn library_dir() -> Result<PathBuf> {
 
 /// Saves PNG bytes to a new file in the captures folder and returns its path.
 pub fn save(png: &[u8]) -> Result<PathBuf> {
-    let dir = captures_dir()?;
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let dir = writable(captures_dir()?, "Captures")?;
     let ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())

@@ -102,7 +102,7 @@ pub fn begin(display: Display, region: Rect, format: Format, meta: Metadata, cx:
             }
             Err(e) => {
                 cx.set_global(State(Phase::Idle));
-                tracing::error!(error = %e, "recording could not start");
+                tracing::error!(error = format_args!("{e:#}"), "recording could not start");
             }
         });
     })
@@ -183,7 +183,10 @@ pub fn stop(cx: &mut App) {
                         crate::toast::show(id, thumb, dims, Some((path, ms)), cx);
                     }
                 }
-                Err(e) => tracing::error!(error = %e, "finishing the recording failed"),
+                Err(e) => tracing::error!(
+                    error = format_args!("{e:#}"),
+                    "finishing the recording failed"
+                ),
             }
         });
     })
