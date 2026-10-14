@@ -17,6 +17,7 @@ pub enum Request {
     RepeatLast,
     CaptureIn(u32),
     Library,
+    Shortcuts,
     EditLatest,
     Record,
     RecordGif,
@@ -29,6 +30,7 @@ impl Request {
             Self::RepeatLast => "repeat".into(),
             Self::CaptureIn(n) => format!("capture-in {n}"),
             Self::Library => "library".into(),
+            Self::Shortcuts => "shortcuts".into(),
             Self::EditLatest => "edit-latest".into(),
             Self::Record => "record".into(),
             Self::RecordGif => "record-gif".into(),
@@ -40,6 +42,7 @@ impl Request {
             "capture" => Self::Capture,
             "repeat" => Self::RepeatLast,
             "library" => Self::Library,
+            "shortcuts" => Self::Shortcuts,
             "edit-latest" => Self::EditLatest,
             "record" => Self::Record,
             "record-gif" => Self::RecordGif,
@@ -123,6 +126,7 @@ mod tests {
             Request::RepeatLast,
             Request::CaptureIn(3),
             Request::Library,
+            Request::Shortcuts,
             Request::EditLatest,
         ] {
             assert_eq!(Request::decode(&r.encode()), Some(r));

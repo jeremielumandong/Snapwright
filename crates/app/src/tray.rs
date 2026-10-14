@@ -1,8 +1,11 @@
-//! The tray (menu bar) icon: Capture, Record, Open captures folder, Theme, updates, Quit.
+//! The tray (menu bar) icon: Capture, Record, Open captures folder, Theme, Keyboard
+//! shortcuts, updates, Quit.
 //!
 //! macOS and Windows use the native status item; Linux uses StatusNotifierItem over D-Bus
 //! (`tray-icon`'s `ksni` backend), so no GTK is needed. Menu clicks arrive on a platform
 //! thread and are forwarded to the UI thread over a channel.
+
+use std::cell::{Cell, RefCell};
 
 use anyhow::Result;
 use futures::channel::mpsc;
@@ -25,6 +28,7 @@ pub enum Action {
     RecordGif,
     OpenLibrary,
     OpenFolder,
+    Shortcuts,
     Theme(Choice),
     Update,
     Quit,
@@ -33,25 +37,41 @@ pub enum Action {
 /// Keeps the tray icon alive for the life of the app.
 pub struct Tray {
     _icon: TrayIcon,
+    capture: MenuItem,
+    repeat: MenuItem,
     record: MenuItem,
     record_gif: MenuItem,
     themes: Vec<(Choice, CheckMenuItem)>,
     update: MenuItem,
-    labels: Labels,
+    labels: RefCell<Labels>,
+    recording: Cell<bool>,
 }
 
 impl Tray {
     /// Switches the record items between starting and stopping a recording.
     pub fn set_recording(&self, recording: bool) {
-        if recording {
-            self.record
-                .set_text(with_shortcut("Stop recording", self.labels.record.as_ref()));
-            self.record_gif.set_enabled(false);
+        self.recording.set(recording);
+        let labels = self.labels.borrow();
+        let text = if recording {
+            "Stop recording"
         } else {
-            self.record
-                .set_text(with_shortcut("Record screen", self.labels.record.as_ref()));
-            self.record_gif.set_enabled(true);
-        }
+            "Record screen"
+        };
+        self.record
+            .set_text(with_shortcut(text, labels.record.as_ref()));
+        self.record_gif.set_enabled(!recording);
+    }
+
+    /// Shows new shortcuts beside the items (they were changed, or Hyprland bound them).
+    pub fn set_labels(&self, labels: &Labels) {
+        self.capture
+            .set_text(with_shortcut("Capture region", labels.capture.as_ref()));
+        self.repeat
+            .set_text(with_shortcut("Repeat last region", labels.repeat.as_ref()));
+        self.record_gif
+            .set_text(with_shortcut("Record GIF", labels.record_gif.as_ref()));
+        *self.labels.borrow_mut() = labels.clone();
+        self.set_recording(self.recording.get());
     }
 
     /// Shows what the updater is doing (`crate::updates`).
@@ -79,6 +99,7 @@ const ID_RECORD: &str = "record";
 const ID_RECORD_GIF: &str = "record-gif";
 const ID_OPEN: &str = "open-folder";
 const ID_LIBRARY: &str = "library";
+const ID_SHORTCUTS: &str = "shortcuts";
 const ID_UPDATE: &str = "update";
 const ID_QUIT: &str = "quit";
 const ID_THEME_PREFIX: &str = "theme-";
@@ -96,6 +117,15 @@ pub struct Labels {
 impl gpui_kit::Global for Labels {}
 
 impl Labels {
+    pub fn get(&self, action: hotkey::Action) -> Option<&String> {
+        match action {
+            hotkey::Action::Capture => self.capture.as_ref(),
+            hotkey::Action::RepeatLast => self.repeat.as_ref(),
+            hotkey::Action::Record => self.record.as_ref(),
+            hotkey::Action::RecordGif => self.record_gif.as_ref(),
+        }
+    }
+
     pub fn from_actions(labels: &[(hotkey::Action, String)]) -> Self {
         let find = |action| {
             labels
@@ -158,20 +188,22 @@ pub fn create(
         None,
     );
     let update = MenuItem::with_id(ID_UPDATE, "Check for updates", true, None);
+    let capture = MenuItem::with_id(
+        ID_CAPTURE,
+        with_shortcut("Capture region", labels.capture.as_ref()),
+        true,
+        None,
+    );
+    let repeat = MenuItem::with_id(
+        ID_REPEAT,
+        with_shortcut("Repeat last region", labels.repeat.as_ref()),
+        true,
+        None,
+    );
     menu.append_items(&[
-        &MenuItem::with_id(
-            ID_CAPTURE,
-            with_shortcut("Capture region", labels.capture.as_ref()),
-            true,
-            None,
-        ),
+        &capture,
         &MenuItem::with_id(ID_DELAYED, "Capture in 3 seconds", true, None),
-        &MenuItem::with_id(
-            ID_REPEAT,
-            with_shortcut("Repeat last region", labels.repeat.as_ref()),
-            true,
-            None,
-        ),
+        &repeat,
         &PredefinedMenuItem::separator(),
         &record,
         &record_gif,
@@ -179,6 +211,7 @@ pub fn create(
         &MenuItem::with_id(ID_LIBRARY, "Open library", true, None),
         &MenuItem::with_id(ID_OPEN, "Open captures folder", true, None),
         &theme_menu,
+        &MenuItem::with_id(ID_SHORTCUTS, "Keyboard shortcuts…", true, None),
         &PredefinedMenuItem::separator(),
         &update,
         &MenuItem::with_id(ID_QUIT, "Quit Snapwright", true, None),
@@ -211,11 +244,14 @@ pub fn create(
     Ok((
         Tray {
             _icon: icon,
+            capture,
+            repeat,
             record,
             record_gif,
             themes,
             update,
-            labels: labels.clone(),
+            labels: RefCell::new(labels.clone()),
+            recording: Cell::new(false),
         },
         rx,
     ))
@@ -230,6 +266,7 @@ fn action_for(id: &MenuId) -> Option<Action> {
         ID_RECORD_GIF => Some(Action::RecordGif),
         ID_LIBRARY => Some(Action::OpenLibrary),
         ID_OPEN => Some(Action::OpenFolder),
+        ID_SHORTCUTS => Some(Action::Shortcuts),
         ID_UPDATE => Some(Action::Update),
         ID_QUIT => Some(Action::Quit),
         other => other
@@ -303,6 +340,10 @@ mod tests {
         assert_eq!(
             action_for(&MenuId::new(ID_LIBRARY)),
             Some(Action::OpenLibrary)
+        );
+        assert_eq!(
+            action_for(&MenuId::new(ID_SHORTCUTS)),
+            Some(Action::Shortcuts)
         );
         assert_eq!(action_for(&MenuId::new(ID_UPDATE)), Some(Action::Update));
         assert_eq!(action_for(&MenuId::new(ID_QUIT)), Some(Action::Quit));

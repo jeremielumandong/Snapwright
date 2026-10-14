@@ -315,3 +315,22 @@ From the "Omarchy theme implementation" design handoff.
   (`scripts/site-shots/northwind.html`) and a seeded library
   (`snapwright-editor`'s `seed` example). The overlay, countdown and preview shots stay as
   they are: those HUDs are always dark.
+
+## 2026-10-14: Shortcuts on Omarchy 4, and changing them
+
+- Omarchy 4 runs Hyprland's Lua config, and Hyprland refuses `keyword` under it ("keyword
+  can't work with non-legacy parsers"), so the IPC binds from 2026-10-13 never took on
+  Omarchy 4 and Ctrl+Shift+2 did nothing. The app now asks Hyprland first (`eval return
+  true` answers `ok` only under Lua) and binds with `eval hl.bind(...)` there, with
+  `keyword bind` kept for the legacy config. Lua binds list only as `__lua` in
+  `hyprctl binds`, so ours carry the description "Snapwright: …" to be found again.
+- Shortcuts are settings: tray > Keyboard shortcuts… (or Change on the library's capture
+  card) opens a window that listens for the next key press per action, with Clear and
+  Reset to defaults. They save as `shortcut.<action> = "Ctrl+Shift+2"` (or `"off"`) in
+  `settings.toml`, only where they differ from the defaults, and apply at once: global
+  hotkeys are re-registered, Hyprland binds on old keys are removed. While the window
+  listens, the binds are lifted, so pressing the current shortcut records it.
+- A shortcut ends in a letter, a digit, F1 to F24 or Print; letters and digits need Ctrl,
+  Alt or Super so typing never sets one off. Hyprland binds use key names (`2`), so on
+  layouts without digits on the unshifted row the digit defaults need changing; binding by
+  keycode is a follow-up.
