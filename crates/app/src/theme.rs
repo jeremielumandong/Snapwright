@@ -253,10 +253,7 @@ pub fn choose(choice: Choice, cx: &mut App) {
     }
     cx.background_executor()
         .spawn(async move {
-            let settings = settings::Settings {
-                theme: Some(choice),
-            };
-            if let Err(e) = settings::save(&settings) {
+            if let Err(e) = settings::update(|s| s.theme = Some(choice)) {
                 tracing::warn!(error = %e, "could not save the theme");
             }
         })

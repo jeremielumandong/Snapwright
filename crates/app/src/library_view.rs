@@ -27,7 +27,7 @@ use snapwright_library::{Capture, Library, Query, Source};
 
 use crate::session::{self, LibraryService};
 use crate::theme::{self, Palette};
-use crate::{assets, countdown, editor_view, toast, tray};
+use crate::{assets, countdown, editor_view, shortcuts_view, toast, tray};
 
 const SIDEBAR_W: f32 = 216.;
 const DETAIL_W: f32 = 340.;
@@ -687,9 +687,23 @@ impl LibraryView {
             .gap(px(8.))
             .child(
                 div()
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("Capture a region"),
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Capture a region"),
+                    )
+                    .child(
+                        Button::new("shortcuts")
+                            .ghost()
+                            .xsmall()
+                            .label("Change")
+                            .tooltip("Keyboard shortcuts")
+                            .on_click(|_, _, cx| shortcuts_view::open(cx)),
+                    ),
             )
             .child(body)
     }
@@ -1462,7 +1476,7 @@ fn ring(p: &Palette) -> Vec<BoxShadow> {
 }
 
 /// A hotkey label like `Ctrl+Shift+2` as keycaps.
-fn hotkey_keys(label: &str) -> Vec<String> {
+pub(crate) fn hotkey_keys(label: &str) -> Vec<String> {
     label
         .split('+')
         .map(|k| match k {
