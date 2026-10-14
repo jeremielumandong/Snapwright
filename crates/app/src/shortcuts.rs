@@ -171,12 +171,14 @@ impl Shortcut {
     }
 
     /// Hyprland's names for the modifiers, `CTRL SHIFT`.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn hypr_mods(&self) -> String {
         hypr_mods(self.mods).join(" ")
     }
 
     /// Hyprland's (xkb's) name for the key. Letters are lower case: xkb reads `A` as the
     /// shifted keysym, which an unshifted press never matches.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn hypr_key(&self) -> String {
         match self.key {
             Key::Letter(c) => c.to_ascii_lowercase().to_string(),
@@ -215,6 +217,7 @@ impl Shortcut {
 }
 
 /// Hyprland's modifier names for a modmask, in a fixed order.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn hypr_mods(mask: u8) -> Vec<&'static str> {
     [
         (CTRL, "CTRL"),
