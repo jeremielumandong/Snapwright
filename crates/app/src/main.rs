@@ -21,6 +21,8 @@ mod recording;
 mod selection;
 mod session;
 mod settings;
+mod shortcuts;
+mod shortcuts_view;
 mod theme;
 mod toast;
 mod tray;
@@ -45,6 +47,7 @@ enum Request {
     RepeatLast,
     CaptureIn(u32),
     Library,
+    Shortcuts,
     EditLatest,
     Record,
     RecordGif,
@@ -57,6 +60,8 @@ const CAPTURE_NOW_ARG: &str = "--capture-now";
 const REPEAT_LAST_ARG: &str = "--repeat-last";
 /// `--library` opens the library window at launch.
 const LIBRARY_ARG: &str = "--library";
+/// `--shortcuts` opens the Shortcuts window at launch.
+const SHORTCUTS_ARG: &str = "--shortcuts";
 /// `--edit-latest` opens the newest capture in the editor (for tests).
 const EDIT_LATEST_ARG: &str = "--edit-latest";
 /// `--capture-in=N` starts a capture after an N-second countdown.
@@ -89,7 +94,8 @@ fn main() -> Result<()> {
     };
     // Read before the UI thread starts, so the first window opens in the right colors.
     let omarchy = omarchy::load();
-    let theme = settings::load().theme.unwrap_or(if omarchy.is_some() {
+    let saved = settings::load();
+    let theme = saved.theme.unwrap_or(if omarchy.is_some() {
         theme::Choice::Omarchy
     } else {
         theme::Choice::System
@@ -116,12 +122,8 @@ fn main() -> Result<()> {
                 })
                 .detach();
             }
-            let labels = if snapwright_capture::wayland_session() {
-                wayland_shortcuts(cx)
-            } else {
-                x11_hotkeys(cx)
-            };
-            cx.set_global(labels.clone());
+            shortcuts::init(saved.shortcuts, cx);
+            let labels = cx.global::<tray::Labels>().clone();
             match tray::create(&labels, theme, has_omarchy) {
                 Ok((tray, mut actions)) => {
                     cx.set_global(tray);
@@ -145,74 +147,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Registers the global hotkeys (X11, macOS, Windows) and returns their tray labels.
-fn x11_hotkeys(cx: &mut gpui_kit::App) -> tray::Labels {
-    let (hotkeys, mut presses) = match hotkey::register() {
-        Ok(registered) => registered,
-        Err(e) => {
-            tracing::warn!(error = %e, "global hotkeys unavailable");
-            return tray::Labels::default();
-        }
-    };
-    for (action, label) in &hotkeys.labels {
-        tracing::info!(hotkey = %label, ?action, "hotkey registered");
+/// A press of `action`'s shortcut (a global hotkey, or a Hyprland bind's launch).
+fn on_hotkey(action: hotkey::Action, at: Instant, cx: &mut gpui_kit::App) {
+    match action {
+        hotkey::Action::Capture => session::start(at, cx),
+        hotkey::Action::RepeatLast => session::repeat_last(at, cx),
+        hotkey::Action::Record => recording::toggle(Format::Mp4, at, cx),
+        hotkey::Action::RecordGif => recording::toggle(Format::Gif, at, cx),
     }
-    let labels = tray::Labels::from_actions(&hotkeys.labels);
-    cx.set_global(hotkeys);
-    cx.spawn(async move |cx| {
-        while let Some((action, pressed_at)) = presses.next().await {
-            cx.update(|cx| match action {
-                hotkey::Action::Capture => session::start(pressed_at, cx),
-                hotkey::Action::RepeatLast => session::repeat_last(pressed_at, cx),
-                hotkey::Action::Record => recording::toggle(Format::Mp4, pressed_at, cx),
-                hotkey::Action::RecordGif => recording::toggle(Format::Gif, pressed_at, cx),
-            });
-        }
-    })
-    .detach();
-    labels
-}
-
-/// Wayland has no global key grabs (X11 grabs under XWayland only fire while an X window
-/// has focus). On Hyprland the app binds its shortcuts in the compositor; elsewhere the user
-/// binds `snapwright-app --capture-now` themselves.
-#[cfg(target_os = "linux")]
-fn wayland_shortcuts(cx: &mut gpui_kit::App) -> tray::Labels {
-    let (Some(dir), Some(exe)) = (hyprland::instance_dir(), hyprland::exe()) else {
-        tracing::info!(
-            "no global hotkeys on this Wayland compositor; bind `snapwright-app --capture-now` \
-             (and `--repeat-last`) to keys in its config"
-        );
-        return tray::Labels::default();
-    };
-    let bound = match hyprland::bind(&dir, &exe) {
-        Ok(bound) => bound,
-        Err(e) => {
-            tracing::warn!(error = %e, "could not bind the shortcuts in Hyprland");
-            return tray::Labels::default();
-        }
-    };
-    for (action, label) in &bound {
-        tracing::info!(hotkey = %label, ?action, "Hyprland bind added");
-    }
-    // Omarchy switches themes with a Hyprland reload, so this is also when to re-read it.
-    match hyprland::watch(dir, exe) {
-        Ok(mut reloads) => {
-            cx.spawn(async move |cx| {
-                while reloads.next().await.is_some() {
-                    cx.update(omarchy::reload);
-                }
-            })
-            .detach();
-        }
-        Err(e) => tracing::warn!(error = %e, "Hyprland events unavailable"),
-    }
-    tray::Labels::from_actions(&bound)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn wayland_shortcuts(_cx: &mut gpui_kit::App) -> tray::Labels {
-    tray::Labels::default()
 }
 
 /// What the command line asks for, in the order the app does it.
@@ -228,6 +170,9 @@ fn requests(args: impl Iterator<Item = String>) -> Vec<Request> {
     }
     if has(LIBRARY_ARG) {
         out.push(Request::Library);
+    }
+    if has(SHORTCUTS_ARG) {
+        out.push(Request::Shortcuts);
     }
     if let Some(n) = args.iter().find_map(|a| {
         a.strip_prefix(CAPTURE_IN_ARG)
@@ -253,6 +198,7 @@ fn handle(request: Request, at: Instant, cx: &mut gpui_kit::App) {
         Request::RepeatLast => session::repeat_last(at, cx),
         Request::CaptureIn(seconds) => countdown::start(seconds, cx),
         Request::Library => library_view::open(cx),
+        Request::Shortcuts => shortcuts_view::open(cx),
         Request::EditLatest => library_view::edit_latest(cx),
         Request::Record => recording::toggle(Format::Mp4, at, cx),
         Request::RecordGif => recording::toggle(Format::Gif, at, cx),
@@ -267,6 +213,7 @@ fn on_tray(action: tray::Action, cx: &mut gpui_kit::App) {
         tray::Action::Record => recording::toggle(Format::Mp4, Instant::now(), cx),
         tray::Action::RecordGif => recording::toggle(Format::Gif, Instant::now(), cx),
         tray::Action::OpenLibrary => library_view::open(cx),
+        tray::Action::Shortcuts => shortcuts_view::open(cx),
         tray::Action::OpenFolder => match output::captures_dir() {
             Ok(dir) => {
                 if let Err(e) = std::fs::create_dir_all(&dir) {

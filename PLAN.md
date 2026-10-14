@@ -108,7 +108,10 @@ Licence, pricing, cloud sharing and team size: see the plan's decisions table.
 ## Follow-ups
 
 - Updates: a Settings switch for the automatic checks and downloads (Switchyard's
-  `updates.check` / `updates.auto_download`) once there is a settings window.
+  `updates.check` / `updates.auto_download`); the Shortcuts window could grow into the
+  settings window.
+- Shortcuts: bind digits by keycode on Hyprland (`code:11`, as Omarchy does) so the defaults
+  work on layouts without digits on the unshifted row (AZERTY).
 - Recording: system audio and microphone (ScreenCaptureKit audio, WASAPI loopback), mixed
   into the MP4. The biggest gap against Snagit, CleanShot X and Loom.
 - Recording: macOS through a running `SCStream` (IOSurfaces straight into the writer, 60 fps)

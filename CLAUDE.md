@@ -91,8 +91,12 @@ site/                           marketing site (static HTML, deployed by .github
   portal backend). `snapwright_capture::wayland_session()` picks the backend and makes
   pop-ups layer-shell surfaces (`session::popup_kind`). No global hotkeys there: the app is
   single-instance (`instance.rs`); on Hyprland it binds its keys over IPC (`hyprland.rs`,
-  re-bound on every config reload), elsewhere users bind `snapwright-app --capture-now` in the
-  compositor. Screencopy waits for a repaint, so it times out while the display sleeps.
+  re-bound on every config reload; `keyword bind` on the legacy config, `eval hl.bind` on the
+  Lua config Omarchy 4 runs, which refuses `keyword`), elsewhere users bind
+  `snapwright-app --capture-now` in the compositor. Screencopy waits for a repaint, so it times out while the display sleeps.
+- Shortcuts are settings (`shortcuts.rs`, `shortcut.capture = "Ctrl+Shift+2"` in
+  `settings.toml`), changed in the Shortcuts window (`--shortcuts`, tray > Keyboard
+  shortcuts…), which lifts every bind while it listens for a key.
 - Theme choice (tray > Theme) lives in `settings.toml` in the config folder; "Follow Omarchy"
   reads `~/.local/state/omarchy/current/theme` (Omarchy 4) or `~/.config/omarchy/current/theme`.
   The 16 bundled Omarchy themes (`omarchy::BUNDLED`) and `site/theme.js` share one list and
