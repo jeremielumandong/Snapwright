@@ -81,7 +81,6 @@ kbd {
   flex: 1 1 0; min-width: 0; font-size: 15px; line-height: 24px; font-weight: 500;
 }
 .header-end { margin-left: auto; display: flex; align-items: center; gap: 18px; }
-.gh { font: 500 13px/1 var(--mono); letter-spacing: 0.02em; white-space: nowrap; }
 .pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px;
   background: var(--ink); color: var(--paper); border-radius: 999px; font-size: 14px; font-weight: 600;
@@ -308,16 +307,6 @@ figcaption.fig b { color: var(--ink); font-weight: 500; white-space: nowrap; }
 .platform .note { font-size: 15.5px; }
 .platform a { justify-self: start; font: 500 13px/1.4 var(--mono); color: var(--night-head); border-bottom: 1px solid var(--night-head); }
 .platform a:hover { color: var(--blue-3); }
-.source { display: flex; flex-wrap: wrap; gap: 24px 64px; margin-top: 64px; }
-.source > div { flex: 1 1 280px; max-width: 380px; }
-.source h3 { margin: 0 0 10px; font-weight: 700; font-size: 24px; letter-spacing: -0.02em; color: var(--night-head); }
-.source p { margin: 0; color: var(--night-text); font-size: 15.5px; }
-.source p code { font: 400 13px var(--mono); color: var(--night-head); }
-.source pre {
-  flex: 1.6 1 420px; margin: 0; padding: 22px 24px; border: 1px solid var(--night-rule); background: var(--pre-bg);
-  color: var(--pre-fg); font: 400 14px/1.75 var(--mono); overflow-x: auto;
-}
-.source pre i { font-style: normal; color: var(--pre-dim); }
 
 /* Theme: the header button and the dock it opens (theme.js). */
 .theme-btn {
@@ -376,7 +365,7 @@ figcaption.fig b { color: var(--ink); font-weight: 500; white-space: nowrap; }
 }
 
 @media (max-width: 640px) {
-  .site-header .gh, .site-header nav { display: none; }
+  .site-header nav { display: none; }
   .site-header .wrap { gap: 20px; }
   .specs span:last-child { white-space: normal; }
 }
